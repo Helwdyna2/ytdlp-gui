@@ -41,7 +41,7 @@ QPushButton {{
     border: 1px solid {t["border-hard"]};
     color: {t["text-primary"]};
     border-radius: {t["r-l"]};
-    padding: 8px 16px;
+    padding: 5px 14px;
 }}
 
 QPushButton:hover {{
@@ -58,11 +58,13 @@ QPushButton#btnPrimary {{
     color: {t["text-on-cyan"]};
     border: none;
     border-radius: {t["r-l"]};
-    padding: 8px 16px;
+    padding: 5px 18px;
+    font-weight: 600;
 }}
 
 QPushButton#btnPrimary:hover {{
-    background: {t["cyan-glow"]};
+    background: {t["bg-hover"]};
+    color: {t["text-bright"]};
 }}
 
 QPushButton#btnPrimary:disabled {{
@@ -76,7 +78,7 @@ QPushButton#btnSecondary {{
     border: 1px solid {t["border-hard"]};
     color: {t["text-primary"]};
     border-radius: {t["r-l"]};
-    padding: 8px 16px;
+    padding: 5px 14px;
 }}
 
 QPushButton#btnSecondary:hover {{
@@ -91,19 +93,70 @@ QPushButton#btnSecondary:pressed {{
 QPushButton#btnDestructive {{
     background: transparent;
     color: {t["red"]};
-    border: none;
+    border: 1px solid {t["border-hard"]};
     border-radius: {t["r-l"]};
-    padding: 8px 16px;
+    padding: 5px 14px;
 }}
 
 QPushButton#btnDestructive:hover {{
     color: {t["red-dim"]};
+    background: {t["bg-hover"]};
+}}
+
+/* ----- 5b. QPushButton[button_role] property selectors ----- */
+QPushButton[button_role="primary"] {{
+    background: {t["accent-primary"]};
+    color: {t["text-on-cyan"]};
+    border: none;
+    border-radius: {t["r-l"]};
+    padding: 5px 18px;
+    font-weight: 600;
+}}
+
+QPushButton[button_role="primary"]:hover {{
+    background: {t["bg-hover"]};
+    color: {t["text-bright"]};
+}}
+
+QPushButton[button_role="primary"]:disabled {{
+    background: {t["bg-selected"]};
+    opacity: 0.6;
+}}
+
+QPushButton[button_role="secondary"] {{
+    background: transparent;
+    border: 1px solid {t["border-hard"]};
+    color: {t["text-primary"]};
+    border-radius: {t["r-l"]};
+    padding: 5px 14px;
+}}
+
+QPushButton[button_role="secondary"]:hover {{
+    background: {t["bg-hover"]};
+}}
+
+QPushButton[button_role="secondary"]:pressed {{
+    background: {t["bg-cell"]};
+}}
+
+QPushButton[button_role="destructive"] {{
+    background: transparent;
+    color: {t["red"]};
+    border: 1px solid {t["border-hard"]};
+    border-radius: {t["r-l"]};
+    padding: 5px 14px;
+}}
+
+QPushButton[button_role="destructive"]:hover {{
+    color: {t["red-dim"]};
+    background: {t["bg-hover"]};
 }}
 
 /* ----- 6. Focus states ----- */
 QPushButton:focus,
 QLineEdit:focus,
 QTextEdit:focus,
+QPlainTextEdit:focus,
 QSpinBox:focus,
 QDoubleSpinBox:focus,
 QComboBox:focus,
