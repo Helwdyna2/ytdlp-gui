@@ -96,3 +96,39 @@ def test_settings_page_creates(qapp):
     from src.ui.pages.settings_page import SettingsPage
     page = SettingsPage()
     assert page is not None
+
+
+def test_settings_page_has_required_sections(qapp):
+    from src.ui.pages.settings_page import SettingsPage
+    from src.ui.components.collapsible_section import CollapsibleSection
+    page = SettingsPage()
+    sections = page.findChildren(CollapsibleSection)
+    titles = [s._title_label.text() for s in sections]
+    required = [
+        "Appearance",
+        "Browser & Authentication",
+        "Download Defaults",
+        "Rate Limiting",
+        "Retry Logic",
+        "Advanced Download Options",
+    ]
+    for name in required:
+        assert name in titles, f"Missing settings section: {name}"
+
+
+def test_settings_page_uses_collapsible_sections(qapp):
+    from src.ui.pages.settings_page import SettingsPage
+    from src.ui.components.collapsible_section import CollapsibleSection
+    page = SettingsPage()
+    sections = page.findChildren(CollapsibleSection)
+    assert len(sections) >= 6, f"Expected at least 6 collapsible sections, found {len(sections)}"
+
+
+def test_settings_page_force_overwrite_tooltip(qapp):
+    from src.ui.pages.settings_page import SettingsPage
+    from PyQt6.QtWidgets import QCheckBox
+    page = SettingsPage()
+    checkboxes = page.findChildren(QCheckBox)
+    overwrite_boxes = [cb for cb in checkboxes if "overwrite" in cb.text().lower() or "overwrite" in cb.objectName().lower()]
+    assert len(overwrite_boxes) >= 1, "Should have a Force Overwrite checkbox"
+    assert overwrite_boxes[0].toolTip() != "", "Force Overwrite should have a tooltip"
