@@ -201,6 +201,7 @@ class TrimPage(QWidget):
 
         self._cancel_btn = QPushButton("Cancel")
         self._cancel_btn.setObjectName("btnSecondary")
+        self._cancel_btn.setProperty("button_role", "secondary")
         self._cancel_btn.setVisible(False)
         action_row.addWidget(self._cancel_btn)
 
@@ -208,6 +209,7 @@ class TrimPage(QWidget):
 
         self._trim_btn = QPushButton("Trim Video")
         self._trim_btn.setObjectName("btnPrimary")
+        self._trim_btn.setProperty("button_role", "primary")
         self._trim_btn.setEnabled(False)
         self._trim_btn.setMinimumWidth(120)
         action_row.addWidget(self._trim_btn)
