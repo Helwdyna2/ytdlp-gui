@@ -1,0 +1,5 @@
+PyQt6
+yt-dlp
+playwright
+send2trash
+qtawesome

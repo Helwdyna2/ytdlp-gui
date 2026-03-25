@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+pytest-of-*/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+
+# Virtual environments
+venv/
+.venv/
+
+# PyInstaller
+build/
+dist/
+
+# App outputs
+downloads/
+
+# Runtime data (generated at runtime, don't commit)
+data/ytdlp_gui.db
+data/config.json
+data/.running.lock
+data/logs/
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+.vscode/
+ytdlp_gui.egg-info/
+.worktrees/
+.superpowers/
+
+cookies/
+
+# Playwright
+
+browser_profiles/
+
+
+ytdlp_gui.egg-info
+*.mkv
+*.mp4
++pytest-of-*/
