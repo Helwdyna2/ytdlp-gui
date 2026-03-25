@@ -162,7 +162,7 @@ LIGHT_TOKENS: Dict[str, str] = {
     # Text
     "text-bright": "#09090b",
     "text-primary": "#3f3f46",
-    "text-dim": "#a1a1aa",
+    "text-dim": "#8a8a92",
     "text-muted": "#71717a",
     "text-on-cyan": "#ffffff",
     "text-strong": "#09090b",
