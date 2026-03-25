@@ -117,7 +117,7 @@ class ExtractUrlsPage(QWidget):
 
         # Auth note
         auth_note = QLabel(
-            "Sign in using the Download tab first to access private content."
+            "Sign in using Add URLs first to access private content."
         )
         auth_note.setWordWrap(True)
         auth_note.setObjectName("dimLabel")
@@ -147,10 +147,12 @@ class ExtractUrlsPage(QWidget):
         action_layout.addStretch()
         self.stop_button = QPushButton("Stop")
         self.stop_button.setObjectName("btnSecondary")
+        self.stop_button.setProperty("button_role", "secondary")
         self.stop_button.setEnabled(False)
         action_layout.addWidget(self.stop_button)
         self.extract_button = QPushButton("Extract")
         self.extract_button.setObjectName("btnPrimary")
+        self.extract_button.setProperty("button_role", "primary")
         action_layout.addWidget(self.extract_button)
         main_layout.addLayout(action_layout)
 

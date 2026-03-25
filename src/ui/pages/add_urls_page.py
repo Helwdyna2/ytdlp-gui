@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ..components.collapsible_section import CollapsibleSection
 from ..components.config_bar import ConfigBar
 from ..components.page_header import PageHeader
 
@@ -55,7 +56,6 @@ class AddUrlsPage(QWidget):
         )
         self._header.add_stat("Queued", "0")
         self._header.add_stat("Active", "0")
-        self._header.add_stat("Done", "0")
         self._header.add_stat("Elapsed", "0:00")
         root.addWidget(self._header)
 
@@ -89,9 +89,11 @@ class AddUrlsPage(QWidget):
         self._config_bar.add_stretch()
         root.addWidget(self._config_bar)
 
-        # 5. Auth status widget
+        # 5. Auth status widget (collapsible)
         if self._auth_status is not None:
-            root.addWidget(self._auth_status)
+            auth_section = CollapsibleSection("Authentication", expanded=False)
+            auth_section.content_layout.addWidget(self._auth_status)
+            root.addWidget(auth_section)
 
         # 6. Action bar
         action_row = QHBoxLayout()
@@ -101,10 +103,12 @@ class AddUrlsPage(QWidget):
         action_row.addStretch()
         self._cancel_btn = QPushButton("Cancel")
         self._cancel_btn.setObjectName("btnSecondary")
+        self._cancel_btn.setProperty("button_role", "secondary")
         self._cancel_btn.clicked.connect(self.cancel_download)
         action_row.addWidget(self._cancel_btn)
         self._start_btn = QPushButton("Start Download")
         self._start_btn.setObjectName("btnPrimary")
+        self._start_btn.setProperty("button_role", "primary")
         self._start_btn.clicked.connect(self.start_download)
         action_row.addWidget(self._start_btn)
         root.addLayout(action_row)
@@ -128,12 +132,11 @@ class AddUrlsPage(QWidget):
     # ---------------------------------------------------------------------------
 
     def set_queue_stats(
-        self, queued: int, active: int, done: int, elapsed: str
+        self, queued: int, active: int, elapsed: str
     ) -> None:
         """Update the PageHeader stats area."""
         self._header.update_stat("Queued", str(queued))
         self._header.update_stat("Active", str(active))
-        self._header.update_stat("Done", str(done))
         self._header.update_stat("Elapsed", elapsed)
 
     def set_download_mode(self, active: bool) -> None:
@@ -144,4 +147,4 @@ class AddUrlsPage(QWidget):
         if self._output_config is not None:
             self._output_config.setEnabled(not active)
         if self._url_input is not None:
-            self._url_input.setEnabled(not active)
+            self._url_input.setVisible(not active)

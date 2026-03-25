@@ -568,7 +568,6 @@ class MainWindow(QMainWindow):
         self.add_urls_page.set_queue_stats(
             queued=total - completed - failed - cancelled,
             active=active,
-            done=completed,
             elapsed="",
         )
 
