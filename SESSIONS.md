@@ -1,5 +1,11 @@
 # Sessions
 
+## 2026-03-25 — codex:2026-03-25:agents-consolidation
+
+- Reviewed repository markdown guidance, excluding the requested audit and redesign docs.
+- Rewrote `AGENTS.md` as the complete agent-facing source of truth for setup, commands, architecture, invariants, troubleshooting, and shared-state maintenance.
+- Reduced `CLAUDE.md` and `.github/copilot-instructions.md` to pointer documents so agent guidance is no longer duplicated across files.
+
 ## 2026-03-17 — auth-cookie retry
 
 - Investigated the Playwright auth flow where logging in and closing the browser still left the Download tab blocked on "needs auth".
