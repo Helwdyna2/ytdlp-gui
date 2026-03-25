@@ -1,4 +1,4 @@
-"""Auth status widget for the Download tab."""
+"""Auth status widget for the Add URLs page."""
 
 import logging
 import os
@@ -175,7 +175,7 @@ class _AuthStatusRow(QWidget):
 
 
 class AuthStatusWidget(QWidget):
-    """Displays per-domain authentication status for the Download tab."""
+    """Displays per-domain authentication status for the Add URLs page."""
 
     authenticate_requested = pyqtSignal(str)
     status_changed = pyqtSignal(dict)
@@ -217,7 +217,7 @@ class AuthStatusWidget(QWidget):
         display_path = _format_path_for_display(cookies_path)
 
         note = QLabel(
-            "Sign in using the Download tab first to access private content."
+            "Sign in using Add URLs first to access private content."
         )
         note.setWordWrap(True)
         note.setObjectName("dimLabel")
