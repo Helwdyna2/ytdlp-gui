@@ -165,7 +165,7 @@ class MatchPage(QWidget):
         action_row.setSpacing(8)
         self.scan_button = QPushButton("Scan Folder")
         self.scan_button.setObjectName("btnCyan")
-        self.scan_button.setProperty("button_role", "primary")
+        self.scan_button.setProperty("button_role", "secondary")
         self.match_button = QPushButton("Start Matching")
         self.match_button.setObjectName("btnPrimary")
         self.match_button.setProperty("button_role", "primary")
@@ -586,7 +586,7 @@ class MatchPage(QWidget):
         QMessageBox.information(
             self,
             f"Login Required - {database}",
-            "Please authenticate using the Download tab (Auth Status panel), "
+            "Please authenticate using Add URLs first, "
             "then retry matching.\n\n"
             f"URL: {url}",
         )
