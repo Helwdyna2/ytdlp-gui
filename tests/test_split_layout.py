@@ -31,3 +31,9 @@ def test_split_layout_right_width(qapp):
     from src.ui.components.split_layout import SplitLayout
     sl = SplitLayout(right_width=260)
     assert sl.right_panel.maximumWidth() == 260
+
+
+def test_split_layout_left_min_width(qapp):
+    from src.ui.components.split_layout import SplitLayout
+    sl = SplitLayout()
+    assert sl.left_panel.minimumWidth() >= 240

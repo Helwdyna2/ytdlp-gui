@@ -71,3 +71,30 @@ def test_shell_switch_to_stage_compat(qapp):
     shell.register_stage(StageDefinition("prepare", "Prepare"), QWidget())
     shell.switch_to_stage("prepare")
     assert shell.active_stage() == "prepare"
+
+
+def test_shell_set_stage_status_noop(qapp):
+    """set_stage_status exists as a no-op for backward compatibility."""
+    from src.ui.shell import Shell
+    shell = Shell()
+    shell.set_stage_status("ingest", "active")  # Should not crash
+
+
+def test_shell_set_badge(qapp):
+    from src.ui.shell import Shell
+    from PyQt6.QtWidgets import QWidget
+    shell = Shell()
+    shell.register_tool("add_urls", QWidget())
+    shell.set_badge("add_urls", 5)  # Should not crash
+
+
+def test_shell_tool_changed_signal(qapp):
+    from src.ui.shell import Shell
+    from PyQt6.QtWidgets import QWidget
+    shell = Shell()
+    shell.register_tool("add_urls", QWidget())
+    shell.register_tool("convert", QWidget())
+    received = []
+    shell.tool_changed.connect(lambda k: received.append(k))
+    shell.sidebar.tool_selected.emit("convert")
+    assert "convert" in received

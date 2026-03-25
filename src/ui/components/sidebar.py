@@ -72,12 +72,12 @@ class Sidebar(QWidget):
         layout.setSpacing(2)
 
         # App title
-        title = QLabel("yt-dlp")
+        title = QLabel("yt-dlp GUI")
         title.setObjectName("appTitle")
         layout.addWidget(title)
 
         # App subtitle
-        subtitle = QLabel("Download \u00b7 Convert \u00b7 Organize")
+        subtitle = QLabel("Download, convert, and organize media")
         subtitle.setObjectName("appSubtitle")
         layout.addWidget(subtitle)
 

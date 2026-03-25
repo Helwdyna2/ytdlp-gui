@@ -12,6 +12,7 @@ class SplitLayout(QWidget):
 
         self.left_panel = QWidget()
         self.left_panel.setObjectName("splitLeft")
+        self.left_panel.setMinimumWidth(240)
         self.left_panel.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )

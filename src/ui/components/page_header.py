@@ -45,7 +45,7 @@ class PageHeader(QWidget):
         val_label = QLabel(value)
         val_label.setObjectName("statValue")
         if color:
-            val_label.setStyleSheet(f"color: {color};")
+            val_label.setProperty("dataColor", color)
 
         lbl_label = QLabel(label.upper())
         lbl_label.setObjectName("statLabel")
@@ -60,4 +60,6 @@ class PageHeader(QWidget):
             lbl = self._stat_value_labels[label]
             lbl.setText(value)
             if color:
-                lbl.setStyleSheet(f"color: {color};")
+                lbl.setProperty("dataColor", color)
+                lbl.style().unpolish(lbl)
+                lbl.style().polish(lbl)
