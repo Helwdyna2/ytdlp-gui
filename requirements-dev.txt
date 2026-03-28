@@ -1,0 +1,18 @@
+# yt-dlp GUI - Development/Testing Dependencies
+# Install with: pip install -r requirements-dev.txt
+#
+# Includes runtime dependencies plus dev tooling.
+# Pinned exact versions for CI reproducibility.
+
+-r requirements.txt
+
+# Testing
+pytest==8.3.4
+pytest-qt==4.4.0
+pytest-cov==6.0.0
+
+# Type checking
+mypy==1.14.1
+
+# Build
+pyinstaller==6.11.1

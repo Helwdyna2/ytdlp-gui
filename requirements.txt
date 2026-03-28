@@ -1,5 +1,22 @@
-PyQt6
-yt-dlp
-playwright
-send2trash
-qtawesome
+# yt-dlp GUI - Runtime Dependencies
+# Install with: pip install -r requirements.txt
+#
+# Versioning Strategy:
+# - Runtime dependencies: minimum version constraints (>=) for flexibility
+# - Dev dependencies in requirements-dev.txt: pinned for reproducibility
+# - Update periodically to latest stable releases for security and features
+
+# Core framework
+PyQt6>=6.7.0
+
+# Video downloading
+yt-dlp>=2024.4.9
+
+# Browser automation (URL extraction, auth)
+playwright>=1.42.0
+
+# Safe file deletion
+send2trash>=1.8.2
+
+# Icon fonts for Qt
+qtawesome>=6.6.0
