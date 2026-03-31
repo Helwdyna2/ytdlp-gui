@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Digital Obsidian - Media Core Match</title>
+<script type="text/javascript" nonce="669c645abba94ecc9adc73736b0" src="//local.adguard.org?ts=1774999110332&amp;type=content-script&amp;dmn=contribution.usercontent.google.com&amp;url=https%3A%2F%2Fcontribution.usercontent.google.com%2Fdownload%3Fc%3DCgthaWRhX2NvZGVmeBJ6Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpZCiVodG1sX2JjODE0ZDAxNzViNDRlYjg4OTI0M2UyMTFiZTA4NGNjEgoSBhDA653LNRgBkgEjCgpwcm9qZWN0X2lkEhVCEzI3MDcyODQ5NTkzMTU2MzgxMDg%26filename%3D%26opi%3D89354086&amp;app=com.apple.Safari&amp;css=3&amp;js=1&amp;rel=1&amp;rji=1&amp;sbe=1&amp;stealth=1&amp;st-push&amp;st-loc&amp;st-java&amp;st-dnt"></script><script type="text/javascript" nonce="669c645abba94ecc9adc73736b0" src="//local.adguard.org?ts=1774999110332&amp;name=AdGuard%20Assistant&amp;name=AdGuard%20Extra&amp;type=user-script"></script><script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "inverse-primary": "#5a5a8d",
+              "surface-container-high": "#1f1f22",
+              "tertiary-dim": "#edeaef",
+              "surface-container-low": "#131315",
+              "on-error-container": "#ffb2b9",
+              "surface-variant": "#262528",
+              "error": "#ff6e84",
+              "background": "#0e0e10",
+              "on-tertiary-fixed": "#4d4c51",
+              "surface-container-lowest": "#000000",
+              "on-secondary-container": "#a8ece9",
+              "on-primary-fixed": "#292959",
+              "primary-container": "#9c9bd3",
+              "surface-container-highest": "#262528",
+              "outline": "#767577",
+              "surface": "#0e0e10",
+              "on-secondary": "#0b5b5a",
+              "on-primary-fixed-variant": "#464678",
+              "surface-dim": "#0e0e10",
+              "on-primary": "#3d3d6e",
+              "secondary-dim": "#9de1de",
+              "on-error": "#490013",
+              "on-tertiary-container": "#57565b",
+              "secondary": "#abefec",
+              "primary-fixed": "#c5c4ff",
+              "inverse-on-surface": "#555557",
+              "primary": "#c5c4ff",
+              "surface-tint": "#c5c4ff",
+              "surface-container": "#19191c",
+              "surface-bright": "#2c2c2f",
+              "on-tertiary-fixed-variant": "#6a696e",
+              "tertiary": "#fbf8fe",
+              "tertiary-fixed": "#fbf8fe",
+              "on-background": "#f6f3f5",
+              "outline-variant": "#48474a",
+              "primary-fixed-dim": "#b8b6f0",
+              "tertiary-fixed-dim": "#edeaef",
+              "on-secondary-fixed-variant": "#1c6564",
+              "error-dim": "#d73357",
+              "primary-dim": "#b8b6f0",
+              "secondary-container": "#075a58",
+              "secondary-fixed": "#abefec",
+              "on-surface-variant": "#acaaad",
+              "on-surface": "#f6f3f5",
+              "tertiary-container": "#edeaef",
+              "on-secondary-fixed": "#004746",
+              "error-container": "#a70138",
+              "on-tertiary": "#5f5e63",
+              "inverse-surface": "#fcf8fb",
+              "on-primary-container": "#1d1c4d",
+              "secondary-fixed-dim": "#9de1de"
+            },
+            fontFamily: {
+              "headline": ["Manrope"],
+              "body": ["Inter"],
+              "label": ["Inter"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+      body {
+        background-color: #0e0e10;
+        color: #f6f3f5;
+        font-family: 'Inter', sans-serif;
+      }
+      .glass-panel {
+        background: rgba(44, 44, 47, 0.8);
+        backdrop-filter: blur(20px);
+      }
+      .primary-gradient {
+        background: linear-gradient(to right, #c5c4ff, #9c9bd3);
+      }
+      ::-webkit-scrollbar { width: 4px; }
+      ::-webkit-scrollbar-track { background: #131315; }
+      ::-webkit-scrollbar-thumb { background: #262528; border-radius: 10px; }
+    </style>
+</head>
+<body class="flex overflow-hidden h-screen">
+<!-- SideNavBar -->
+<aside class="hidden md:flex flex-col h-full py-8 px-4 bg-[#131315] dark:bg-[#131315] w-64 flex-shrink-0 z-40">
+<div class="mb-10 px-4">
+<h1 class="font-manrope font-extrabold text-[#c5c4ff] text-lg tracking-tight">Media Core</h1>
+<p class="font-inter text-[10px] font-medium uppercase tracking-widest text-[#acaaad] mt-1">V2.4.1 Active</p>
+</div>
+<nav class="flex-grow space-y-1">
+<a class="flex items-center gap-3 text-[#acaaad] px-4 py-3 hover:bg-[#19191c] transition-colors duration-150 ease-in-out font-inter text-xs font-medium uppercase tracking-widest" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="download">download</span>
+<span>Download</span>
+</a>
+<!-- Active State: Match Screen maps to Process -->
+<a class="flex items-center gap-3 bg-[#1f1f22] text-[#c5c4ff] rounded-md px-4 py-3 transition-colors duration-150 ease-in-out font-inter text-xs font-medium uppercase tracking-widest" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="sync">sync</span>
+<span>Process</span>
+</a>
+<a class="flex items-center gap-3 text-[#acaaad] px-4 py-3 hover:bg-[#19191c] transition-colors duration-150 ease-in-out font-inter text-xs font-medium uppercase tracking-widest" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="folder_managed">folder_managed</span>
+<span>Organize</span>
+</a>
+</nav>
+<div class="px-4 mt-auto mb-8">
+<button class="w-full py-3 primary-gradient text-[#1d1c4d] font-bold text-xs uppercase tracking-widest rounded-md transition-transform active:opacity-80 scale-95 active:scale-90">
+                New Batch
+            </button>
+</div>
+<div class="space-y-1">
+<a class="flex items-center gap-3 text-[#acaaad] px-4 py-3 hover:bg-[#19191c] transition-colors duration-150 ease-in-out font-inter text-xs font-medium uppercase tracking-widest" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="terminal">terminal</span>
+<span>Logs</span>
+</a>
+<a class="flex items-center gap-3 text-[#acaaad] px-4 py-3 hover:bg-[#19191c] transition-colors duration-150 ease-in-out font-inter text-xs font-medium uppercase tracking-widest" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="help_outline">help_outline</span>
+<span>Support</span>
+</a>
+</div>
+</aside>
+<div class="flex-grow flex flex-col min-w-0 bg-[#0e0e10]">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center w-full px-6 h-16 bg-[#131315] flex-shrink-0">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold text-[#c5c4ff] tracking-tighter font-manrope">Digital Obsidian</span>
+<nav class="hidden md:flex gap-6">
+<a class="font-manrope font-semibold text-sm tracking-tight text-[#acaaad] hover:text-[#c5c4ff] transition-colors" href="#">Downloads</a>
+<a class="font-manrope font-semibold text-sm tracking-tight text-[#c5c4ff] border-b-2 border-[#c5c4ff] pb-1" href="#">Processing</a>
+<a class="font-manrope font-semibold text-sm tracking-tight text-[#acaaad] hover:text-[#c5c4ff] transition-colors" href="#">Organization</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="relative flex items-center">
+<span class="material-symbols-outlined absolute left-3 text-on-surface-variant text-sm" data-icon="search">search</span>
+<input class="bg-[#000000] border-none focus:ring-1 focus:ring-primary/40 rounded-md py-1.5 pl-10 pr-4 text-xs font-body w-48 transition-all" placeholder="Filter jobs..." type="text"/>
+</div>
+<button class="material-symbols-outlined text-[#acaaad] hover:text-[#c5c4ff] transition-all duration-200" data-icon="notifications">notifications</button>
+<button class="material-symbols-outlined text-[#acaaad] hover:text-[#c5c4ff] transition-all duration-200" data-icon="settings">settings</button>
+<div class="h-8 w-8 bg-[#262528] rounded-full flex items-center justify-center border border-outline-variant/15 overflow-hidden">
+<img alt="User profile" data-alt="close-up portrait of a digital avatar with a minimalist tech aesthetic on a dark background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB4H7drbN7M3BN2HHw5pol_YZer3619YpJKcJ3dtCBggQWKUEj9Vgpwx1J2NqVHOsLo_s-YjTBWtOtpdg4anJLHWOzsVt_XQ4acrKfqxZYv9JloMl2nHX5kXxXQ5h2xGNr1XSuINsM5HbkpVCpvD5Tqp8CX3C6Ve91LVP-RCzEsOdFH6Dlv4G9xJIwwERxbmTirMZNZOrOVwFU4aurR2K6JwRJKApO1DuLjLA5AboyXo5Xbsa5q7EfsFiYWjvxVzMkI6At-vuT8uA"/>
+</div>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="flex-grow overflow-y-auto p-6 space-y-6">
+<!-- Header & Control Bar -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+<div>
+<h2 class="font-headline font-bold text-2xl text-on-surface">Database Matcher</h2>
+<p class="text-on-surface-variant text-sm">Identifying metadata for 24 queued media files.</p>
+</div>
+<div class="flex items-center gap-2">
+<button class="px-4 py-2 bg-surface-container-high hover:bg-surface-bright text-on-surface text-xs font-bold uppercase tracking-widest transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="folder_open">folder_open</span>
+                        Source: /downloads/incoming
+                    </button>
+<button class="px-4 py-2 primary-gradient text-on-primary-container text-xs font-bold uppercase tracking-widest transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="bolt">bolt</span>
+                        Start Auto-Match
+                    </button>
+</div>
+</div>
+<!-- Dashboard Layout (Bento Style) -->
+<div class="grid grid-cols-12 gap-6">
+<!-- Database Configuration Panel -->
+<section class="col-span-12 lg:col-span-3 space-y-4">
+<div class="bg-surface-container-low p-5 rounded-lg border border-outline-variant/10">
+<h3 class="font-headline text-xs font-bold uppercase tracking-widest text-[#c5c4ff] mb-4">Database Toggles</h3>
+<div class="space-y-3">
+<div class="flex items-center justify-between p-3 bg-surface-container-lowest rounded">
+<span class="text-xs font-medium text-on-surface">IMDB Protocol</span>
+<div class="w-8 h-4 bg-primary/40 rounded-full relative cursor-pointer">
+<div class="absolute right-0.5 top-0.5 w-3 h-3 bg-primary rounded-full"></div>
+</div>
+</div>
+<div class="flex items-center justify-between p-3 bg-surface-container-lowest rounded">
+<span class="text-xs font-medium text-on-surface">TMDB (Primary)</span>
+<div class="w-8 h-4 bg-primary/40 rounded-full relative cursor-pointer">
+<div class="absolute right-0.5 top-0.5 w-3 h-3 bg-primary rounded-full"></div>
+</div>
+</div>
+<div class="flex items-center justify-between p-3 bg-surface-container-lowest rounded opacity-40">
+<span class="text-xs font-medium text-on-surface">TVDB Legacy</span>
+<div class="w-8 h-4 bg-outline-variant rounded-full relative cursor-pointer">
+<div class="absolute left-0.5 top-0.5 w-3 h-3 bg-on-surface-variant rounded-full"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="bg-surface-container-low p-5 rounded-lg border border-outline-variant/10">
+<h3 class="font-headline text-xs font-bold uppercase tracking-widest text-[#c5c4ff] mb-4">Scan Confidence</h3>
+<div class="space-y-4">
+<div>
+<div class="flex justify-between text-[10px] uppercase font-bold text-on-surface-variant mb-1">
+<span>Threshold</span>
+<span>85%</span>
+</div>
+<div class="h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-secondary w-[85%]"></div>
+</div>
+</div>
+<p class="text-[10px] text-on-surface-variant italic">Files below threshold will require manual confirmation.</p>
+</div>
+</div>
+</section>
+<!-- Main Data Table -->
+<section class="col-span-12 lg:col-span-9 bg-surface-container-low rounded-lg overflow-hidden border border-outline-variant/10">
+<div class="p-4 border-b border-outline-variant/5 flex justify-between items-center bg-surface-container">
+<div class="flex items-center gap-4">
+<span class="text-xs font-bold text-on-surface uppercase tracking-widest">Active Batch: Delta-9</span>
+<span class="px-2 py-0.5 bg-secondary-container text-secondary text-[10px] font-bold rounded uppercase tracking-tighter">Processing</span>
+</div>
+<div class="flex gap-2">
+<button class="material-symbols-outlined text-sm text-on-surface-variant hover:text-on-surface" data-icon="refresh">refresh</button>
+<button class="material-symbols-outlined text-sm text-on-surface-variant hover:text-on-surface" data-icon="filter_list">filter_list</button>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low">
+<th class="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">Source Filename</th>
+<th class="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">Best Match</th>
+<th class="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-on-surface-variant">Score</th>
+<th class="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-on-surface-variant text-right">Status</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/5">
+<tr class="hover:bg-surface-container-high transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant text-lg" data-icon="movie">movie</span>
+<span class="text-xs font-medium text-on-surface">The.Creator.2023.2160p.REDUX.mkv</span>
+</div>
+</td>
+<td class="px-6 py-4 text-xs text-on-surface-variant">The Creator (2023)</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="text-xs text-secondary font-bold">99%</span>
+<div class="w-12 h-1 bg-surface-container-highest rounded-full">
+<div class="h-full bg-secondary w-full"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<span class="inline-flex items-center gap-1.5 px-2 py-1 bg-secondary-container/20 text-secondary text-[10px] font-bold rounded">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+                                            MATCHED
+                                        </span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-high transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant text-lg" data-icon="tv">tv</span>
+<span class="text-xs font-medium text-on-surface">Succession.S04E10.WEB-DL.x264.mp4</span>
+</div>
+</td>
+<td class="px-6 py-4 text-xs text-on-surface-variant">Succession (2018)</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="text-xs text-primary font-bold">72%</span>
+<div class="w-12 h-1 bg-surface-container-highest rounded-full">
+<div class="h-full bg-primary w-[72%]"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<span class="inline-flex items-center gap-1.5 px-2 py-1 bg-primary/20 text-primary text-[10px] font-bold rounded animate-pulse">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                                            SCANNING
+                                        </span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-high transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant text-lg" data-icon="movie">movie</span>
+<span class="text-xs font-medium text-on-surface">Oppenheimer.Internal.Pre.Scr.avi</span>
+</div>
+</td>
+<td class="px-6 py-4 text-xs text-on-surface-variant">—</td>
+<td class="px-6 py-4 text-xs text-on-surface-variant">0%</td>
+<td class="px-6 py-4 text-right">
+<span class="inline-flex items-center gap-1.5 px-2 py-1 bg-error-container/20 text-error text-[10px] font-bold rounded">
+<span class="w-1.5 h-1.5 rounded-full bg-error"></span>
+                                            NO MATCH
+                                        </span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-high transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant text-lg" data-icon="movie">movie</span>
+<span class="text-xs font-medium text-on-surface">Poor.Things.2023.1080p.mkv</span>
+</div>
+</td>
+<td class="px-6 py-4 text-xs text-on-surface-variant">Poor Things (2023)</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="text-xs text-secondary font-bold">94%</span>
+<div class="w-12 h-1 bg-surface-container-highest rounded-full">
+<div class="h-full bg-secondary w-[94%]"></div>
+</div>
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<span class="inline-flex items-center gap-1.5 px-2 py-1 bg-secondary-container/20 text-secondary text-[10px] font-bold rounded">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+                                            MATCHED
+                                        </span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+</main>
+<!-- BottomNavBar -->
+<footer class="fixed bottom-0 left-0 w-full flex justify-between items-center px-6 bg-[#0e0e10] h-8 z-50 border-t border-[#48474a]/15">
+<div class="flex items-center gap-6">
+<div class="text-[#abefec] flex items-center gap-1 font-inter text-[10px] uppercase font-bold tracking-widest">
+<span class="material-symbols-outlined text-xs" data-icon="info">info</span>
+<span>Status: Matching Files...</span>
+</div>
+<div class="text-[#48474a] flex items-center gap-1 font-inter text-[10px] uppercase font-bold tracking-widest hover:text-white transition-colors cursor-default">
+<span class="material-symbols-outlined text-xs" data-icon="database">database</span>
+<span>Metadata: Linked</span>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="text-[#48474a] flex items-center gap-1 font-inter text-[10px] uppercase font-bold tracking-widest hover:text-white transition-colors cursor-default">
+<span class="material-symbols-outlined text-xs" data-icon="lan">lan</span>
+<span>Network: 1.2 Gbps</span>
+</div>
+<div class="text-[#48474a] flex items-center gap-1 font-inter text-[10px] uppercase font-bold tracking-widest hover:text-white transition-colors cursor-default">
+<span class="material-symbols-outlined text-xs" data-icon="settings_applications">settings_applications</span>
+<span>Settings</span>
+</div>
+</div>
+</footer>
+</div>
+<!-- Mobile Navigation (Overlay) -->
+<div class="md:hidden fixed bottom-10 left-1/2 -translate-x-1/2 glass-panel border border-outline-variant/20 rounded-full px-6 py-3 flex gap-8 z-50 shadow-2xl">
+<span class="material-symbols-outlined text-[#acaaad]" data-icon="download">download</span>
+<span class="material-symbols-outlined text-[#c5c4ff]" data-icon="sync" style="font-variation-settings: 'FILL' 1;">sync</span>
+<span class="material-symbols-outlined text-[#acaaad]" data-icon="folder_managed">folder_managed</span>
+<span class="material-symbols-outlined text-[#acaaad]" data-icon="settings">settings</span>
+</div>
+</body></html>
