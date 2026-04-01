@@ -1,4 +1,4 @@
-"""DataPanel — Signal Deck styled container replacing QGroupBox.
+"""DataPanel — Digital Obsidian styled container panel.
 
 Provides a header bar with title, optional status tag, and optional action
 button slot, plus a body area where callers add their own content via
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class DataPanel(QWidget):
-    """Themed panel container with header and body sections.
+    """Themed panel container with tonal surface, rounded corners, and no borders.
 
     Args:
         title: Text displayed in the header (rendered in title case).
@@ -71,7 +71,7 @@ class DataPanel(QWidget):
         header.setObjectName("dpanelHeader")
 
         self._header_layout = QHBoxLayout(header)
-        self._header_layout.setContentsMargins(10, 4, 10, 4)
+        self._header_layout.setContentsMargins(14, 10, 14, 6)
         self._header_layout.setSpacing(8)
 
         self._title_label = QLabel(title.title())
@@ -87,7 +87,7 @@ class DataPanel(QWidget):
         body.setObjectName("dpanelBody")
 
         self._body_layout = QVBoxLayout(body)
-        self._body_layout.setContentsMargins(10, 8, 10, 8)
-        self._body_layout.setSpacing(6)
+        self._body_layout.setContentsMargins(14, 8, 14, 14)
+        self._body_layout.setSpacing(8)
 
         outer.addWidget(body)

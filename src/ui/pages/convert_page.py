@@ -72,7 +72,7 @@ class FileListWidget(QWidget):
         self._add_folder_btn.setObjectName("btnWire")
         self._add_folder_btn.setProperty("button_role", "secondary")
         self._remove_btn = QPushButton("Remove Selected")
-        self._remove_btn.setObjectName("btnDanger")
+        self._remove_btn.setObjectName("btnDestructive")
         self._remove_btn.setProperty("button_role", "destructive")
         self._clear_btn = QPushButton("Clear")
         self._clear_btn.setObjectName("btnWire")
@@ -248,8 +248,8 @@ class ConvertPage(QWidget):
     def _setup_ui(self) -> None:
         """Build the full page layout."""
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(12)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(16)
 
         # 1. Page header
         header = PageHeader(
@@ -259,23 +259,36 @@ class ConvertPage(QWidget):
         root.addWidget(header)
 
         # 2. Split layout: file list left, settings right
-        split = SplitLayout(right_width=320)
+        split = SplitLayout(right_width=340, gap=20)
 
-        # --- LEFT panel: toolbar + file list ---
+        # --- LEFT panel: file list ---
         left_layout = QVBoxLayout(split.left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(6)
+        left_layout.setSpacing(8)
 
         self._file_list = FileListWidget()
         left_layout.addWidget(self._file_list)
 
-        # --- RIGHT panel: settings ---
+        # Jobs area
+        self._jobs_list = QListWidget()
+        self._jobs_list.setMaximumHeight(160)
+        left_layout.addWidget(self._jobs_list)
+
+        self._overall_progress = QProgressBar()
+        left_layout.addWidget(self._overall_progress)
+
+        # --- RIGHT panel: settings card ---
         right_layout = QVBoxLayout(split.right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)
+        right_layout.setSpacing(12)
+
+        from ..components.data_panel import DataPanel
+
+        settings_panel = DataPanel("Output Settings")
+        sl = settings_panel.body_layout
 
         # Output Format
-        right_layout.addWidget(QLabel("Output Format"))
+        sl.addWidget(QLabel("Output Format"))
         self._codec_combo = QComboBox()
         self._codec_combo.addItems([
             "mp4 / H.264",
@@ -285,10 +298,10 @@ class ConvertPage(QWidget):
             "aac",
             "flac",
         ])
-        right_layout.addWidget(self._codec_combo)
+        sl.addWidget(self._codec_combo)
 
         # Quality
-        right_layout.addWidget(QLabel("Quality"))
+        sl.addWidget(QLabel("Quality"))
         quality_row = QHBoxLayout()
         self._crf_slider = QSlider(Qt.Orientation.Horizontal)
         self._crf_slider.setToolTip(
@@ -303,66 +316,47 @@ class ConvertPage(QWidget):
         self._crf_label.setMinimumWidth(30)
         quality_row.addWidget(self._crf_slider)
         quality_row.addWidget(self._crf_label)
-        right_layout.addLayout(quality_row)
+        sl.addLayout(quality_row)
 
         # Preset
-        right_layout.addWidget(QLabel("Preset"))
+        sl.addWidget(QLabel("Preset"))
         self._preset_combo = QComboBox()
         self._preset_combo.addItems(CONVERSION_PRESETS)
         self._preset_combo.setCurrentText(DEFAULT_PRESET)
-        right_layout.addWidget(self._preset_combo)
+        sl.addWidget(self._preset_combo)
 
         # Hardware Acceleration
-        right_layout.addWidget(QLabel("Hardware Acceleration"))
+        sl.addWidget(QLabel("Hardware Acceleration"))
         self._hw_combo = QComboBox()
         self._hw_combo.addItems(["None", "NVENC", "VideoToolbox", "VAAPI"])
-        right_layout.addWidget(self._hw_combo)
+        sl.addWidget(self._hw_combo)
 
         # Output Folder
-        right_layout.addWidget(QLabel("Output Folder"))
+        sl.addWidget(QLabel("Output Folder"))
         output_row = QHBoxLayout()
         self._output_input = QLineEdit()
         self._output_input.setPlaceholderText("Same as input (adds _converted suffix)")
         self._output_browse_btn = QPushButton("Browse")
-        self._output_browse_btn.setObjectName("btnWire")
         self._output_browse_btn.setProperty("button_role", "secondary")
         output_row.addWidget(self._output_input)
         output_row.addWidget(self._output_browse_btn)
-        right_layout.addLayout(output_row)
+        sl.addLayout(output_row)
 
+        right_layout.addWidget(settings_panel)
         right_layout.addStretch()
 
-        root.addWidget(split, stretch=1)
-
-        # 3. Progress section
-        jobs_header = QLabel("Jobs")
-        jobs_header.setObjectName("dpanelTitle")
-        root.addWidget(jobs_header)
-
-        self._jobs_list = QListWidget()
-        self._jobs_list.setMaximumHeight(160)
-        root.addWidget(self._jobs_list)
-
-        self._overall_progress = QProgressBar()
-        root.addWidget(self._overall_progress)
-
-        # 4. Action bar
-        action_row = QHBoxLayout()
-        action_row.addStretch()
+        # CTA
+        self._start_btn = QPushButton("START CONVERT")
+        self._start_btn.setProperty("button_role", "cta")
+        self._start_btn.setEnabled(False)
+        right_layout.addWidget(self._start_btn)
 
         self._cancel_btn = QPushButton("Cancel")
-        self._cancel_btn.setObjectName("btnSecondary")
         self._cancel_btn.setProperty("button_role", "secondary")
         self._cancel_btn.setVisible(False)
+        right_layout.addWidget(self._cancel_btn)
 
-        self._start_btn = QPushButton("Start Convert")
-        self._start_btn.setObjectName("btnPrimary")
-        self._start_btn.setProperty("button_role", "primary")
-        self._start_btn.setEnabled(False)
-
-        action_row.addWidget(self._cancel_btn)
-        action_row.addWidget(self._start_btn)
-        root.addLayout(action_row)
+        root.addWidget(split, stretch=1)
 
     def _connect_signals(self) -> None:
         """Wire up all signal connections."""

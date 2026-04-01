@@ -16,3 +16,22 @@ mypy
 
 # Build
 pyinstaller
+
+# Core framework
+PyQt6
+
+# Video downloading
+yt-dlp
+
+# Browser automation (URL extraction, auth)
+playwright
+
+# Safe file deletion
+send2trash
+
+# Icon fonts for Qt
+qtawesome
+
+# Video preview and timeline
+mpv
+superqt

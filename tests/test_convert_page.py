@@ -54,37 +54,37 @@ def test_convert_page_quality_label_and_crf_tooltip(qapp):
     assert "CRF" in page._crf_slider.toolTip()
 
 
-def test_convert_page_progress_below_split(qapp):
+def test_convert_page_progress_in_left_panel(qapp):
     from src.ui.pages.convert_page import ConvertPage
     from src.ui.components.split_layout import SplitLayout
     from PyQt6.QtWidgets import QProgressBar
     page = ConvertPage()
-    # Progress bar should exist and not be inside the SplitLayout
+    # Progress bar should exist inside the left panel of the SplitLayout
     progress = page._overall_progress
     assert isinstance(progress, QProgressBar)
     splits = page.findChildren(SplitLayout)
     assert len(splits) == 1
-    # Progress should not be a child of the split layout
-    assert not splits[0].isAncestorOf(progress), \
-        "Progress bar should be below the split layout, not inside it"
+    # Progress is now inside the left panel of the split layout (bento style)
+    assert splits[0].isAncestorOf(progress), \
+        "Progress bar should be inside the split layout left panel"
 
 
 def test_convert_page_one_primary_action(qapp):
     from src.ui.pages.convert_page import ConvertPage
     from PyQt6.QtWidgets import QPushButton
     page = ConvertPage()
-    primaries = [
+    ctas = [
         btn for btn in page.findChildren(QPushButton)
-        if btn.property("button_role") == "primary"
+        if btn.property("button_role") == "cta"
     ]
-    assert len(primaries) == 1, f"Expected 1 primary button, found {len(primaries)}"
-    assert primaries[0].text() == "Start Convert"
+    assert len(ctas) == 1, f"Expected 1 CTA button, found {len(ctas)}"
+    assert ctas[0].text() == "START CONVERT"
 
 
 def test_convert_page_start_btn_role(qapp):
     from src.ui.pages.convert_page import ConvertPage
     page = ConvertPage()
-    assert page._start_btn.property("button_role") == "primary"
+    assert page._start_btn.property("button_role") == "cta"
 
 
 def test_convert_page_cancel_btn_role(qapp):

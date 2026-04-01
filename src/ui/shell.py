@@ -1,9 +1,17 @@
-"""Shell layout widget — top-level workbench shell."""
+"""Shell layout widget — Digital Obsidian workbench shell.
+
+Layout:
+    [Sidebar | HeaderBar       ]
+    [        | Content stack   ]
+    [        | StatusBar       ]
+"""
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QStackedWidget
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget
 
-from src.ui.components.sidebar import Sidebar
+from src.ui.components.sidebar import Sidebar, TOOL_SECTION_MAP
+from src.ui.components.header_bar import HeaderBar
+from src.ui.components.status_bar import StatusBar
 
 
 class Shell(QWidget):
@@ -16,21 +24,51 @@ class Shell(QWidget):
         self._tool_widgets: dict[str, QWidget] = {}
         self._tool_order: list[str] = []
 
+        # Components
         self.sidebar = Sidebar()
+        self.header_bar = HeaderBar()
+        self.status_bar = StatusBar()
         self.content_stack = QStackedWidget()
 
+        # Right-side column: header + content + status bar
+        right_col = QVBoxLayout()
+        right_col.setContentsMargins(0, 0, 0, 0)
+        right_col.setSpacing(0)
+        right_col.addWidget(self.header_bar)
+        right_col.addWidget(self.content_stack, stretch=1)
+        right_col.addWidget(self.status_bar)
+
+        # Main layout: sidebar | right column
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.sidebar)
-        layout.addWidget(self.content_stack)
+        layout.addLayout(right_col)
 
+        # Wiring
         self.sidebar.tool_selected.connect(self._on_tool_selected)
+        self.header_bar.section_selected.connect(self._on_section_selected)
 
     def _on_tool_selected(self, key: str) -> None:
         self._switch(key)
         self.tool_changed.emit(key)
         self.stage_changed.emit(key)
+        # Sync header section
+        section = TOOL_SECTION_MAP.get(key)
+        if section:
+            self.header_bar.select_section(section)
+
+    def _on_section_selected(self, section: str) -> None:
+        """When a header section tab is clicked, switch to the first tool in that section."""
+        section_first = {
+            "downloads": "add_urls",
+            "processing": "convert",
+            "organization": "sort",
+        }
+        key = section_first.get(section)
+        if key and key in self._tool_widgets:
+            self._switch(key)
+            self.sidebar.select_tool(key)
 
     def _switch(self, key: str) -> None:
         if key in self._tool_widgets:

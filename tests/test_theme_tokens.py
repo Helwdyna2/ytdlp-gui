@@ -37,11 +37,12 @@ def test_tokens_values_are_strings():
 
 
 def test_font_stacks_defined():
-    from src.ui.theme.tokens import FONT_DISPLAY, FONT_BODY
+    from src.ui.theme.tokens import FONT_DISPLAY, FONT_BODY, FONT_HEADLINE
 
     assert "Segoe UI" in FONT_BODY
     assert "Helvetica" in FONT_BODY
-    assert FONT_DISPLAY == FONT_BODY
+    assert FONT_DISPLAY == FONT_HEADLINE
+    assert "Manrope" in FONT_HEADLINE
 
 
 def test_workspace_tokens_include_shell_keys():
@@ -67,26 +68,26 @@ def test_workspace_tokens_include_shell_keys():
 def test_dark_token_surfaces():
     from src.ui.theme.tokens import DARK_TOKENS
 
-    assert DARK_TOKENS["bg-void"] == "#09090b"
-    assert DARK_TOKENS["bg-surface"] == "#0f0f12"
-    assert DARK_TOKENS["bg-panel"] == "#18181b"
-    assert DARK_TOKENS["bg-cell"] == "#1c1c21"
-    assert DARK_TOKENS["bg-hover"] == "#27272a"
+    assert DARK_TOKENS["bg-void"] == "#0e0e10"
+    assert DARK_TOKENS["bg-surface"] == "#131315"
+    assert DARK_TOKENS["bg-panel"] == "#19191c"
+    assert DARK_TOKENS["bg-cell"] == "#1f1f22"
+    assert DARK_TOKENS["bg-hover"] == "#262528"
 
 
 def test_dark_token_text():
     from src.ui.theme.tokens import DARK_TOKENS
 
-    assert DARK_TOKENS["text-primary"] == "#a1a1aa"
-    assert DARK_TOKENS["text-muted"] == "#8a8a94"
-    assert DARK_TOKENS["text-bright"] == "#fafafa"
+    assert DARK_TOKENS["text-primary"] == "#acaaad"
+    assert DARK_TOKENS["text-muted"] == "#48474a"
+    assert DARK_TOKENS["text-bright"] == "#f6f3f5"
 
 
 def test_dark_token_status_colors():
     from src.ui.theme.tokens import DARK_TOKENS
 
-    assert DARK_TOKENS["cyan"] == "#3b82f6"
-    assert DARK_TOKENS["accent-primary"] == "#fafafa"
+    assert DARK_TOKENS["cyan"] == "#c5c4ff"
+    assert DARK_TOKENS["accent-primary"] == "#c5c4ff"
 
 
 # ------------------------------------------------------------------
@@ -96,41 +97,41 @@ def test_dark_token_status_colors():
 def test_light_token_surfaces():
     from src.ui.theme.tokens import LIGHT_TOKENS
 
-    assert LIGHT_TOKENS["bg-void"] == "#fafafa"
-    assert LIGHT_TOKENS["bg-surface"] == "#f4f4f5"
+    assert LIGHT_TOKENS["bg-void"] == "#f6f3f5"
+    assert LIGHT_TOKENS["bg-surface"] == "#eeeced"
     assert LIGHT_TOKENS["bg-panel"] == "#ffffff"
 
 
 def test_light_token_borders():
     from src.ui.theme.tokens import LIGHT_TOKENS
 
-    assert LIGHT_TOKENS["border-hard"] == "#d4d4d8"
+    assert LIGHT_TOKENS["border-hard"] == "rgba(72, 71, 74, 0.18)"
 
 
 def test_light_token_text():
     from src.ui.theme.tokens import LIGHT_TOKENS
 
-    assert LIGHT_TOKENS["text-primary"] == "#3f3f46"
-    assert LIGHT_TOKENS["text-muted"] == "#71717a"
+    assert LIGHT_TOKENS["text-primary"] == "#48474a"
+    assert LIGHT_TOKENS["text-muted"] == "#acaaad"
 
 
 def test_light_token_status_colors():
     from src.ui.theme.tokens import LIGHT_TOKENS
 
-    assert LIGHT_TOKENS["cyan"] == "#2563eb"
-    assert LIGHT_TOKENS["red"] == "#dc2626"
-    assert LIGHT_TOKENS["accent-primary"] == "#18181b"
+    assert LIGHT_TOKENS["cyan"] == "#6461b3"
+    assert LIGHT_TOKENS["red"] == "#d73357"
+    assert LIGHT_TOKENS["accent-primary"] == "#6461b3"
 
 
 # ------------------------------------------------------------------
 # Radius contract
 # ------------------------------------------------------------------
 
-def test_radius_r_l_is_6px():
+def test_radius_r_l_is_12px():
     from src.ui.theme.tokens import DARK_TOKENS, LIGHT_TOKENS
 
-    assert DARK_TOKENS["r-l"] == "6px"
-    assert LIGHT_TOKENS["r-l"] == "6px"
+    assert DARK_TOKENS["r-l"] == "12px"
+    assert LIGHT_TOKENS["r-l"] == "12px"
 
 
 # ------------------------------------------------------------------

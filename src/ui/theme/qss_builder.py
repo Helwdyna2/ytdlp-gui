@@ -1,4 +1,4 @@
-"""QSS stylesheet builder for the zinc monochrome design system.
+"""QSS stylesheet builder for the Digital Obsidian design system.
 
 Takes theme token dicts and font strings, returns a complete QSS stylesheet
 string for the entire PyQt6 application. All colors and spacing values come
@@ -10,6 +10,7 @@ def build_qss(
     tokens: dict,
     font_body: str,
     font_mono: str,
+    font_headline: str = "",
 ) -> str:
     """Build a complete QSS stylesheet from theme tokens and font stacks.
 
@@ -17,14 +18,16 @@ def build_qss(
         tokens: Dict of theme tokens (e.g. DARK_TOKENS or LIGHT_TOKENS).
         font_body: CSS font-family string for body text.
         font_mono: CSS font-family string for monospace/code text.
+        font_headline: CSS font-family string for headlines (Manrope).
 
     Returns:
         A single QSS stylesheet string ready for QApplication.setStyleSheet().
     """
     t = tokens
+    hl = font_headline or font_body
     return f"""
 /* ===================================================================
-   Zinc Monochrome QSS — auto-generated from theme tokens
+   Digital Obsidian QSS — auto-generated from theme tokens
    =================================================================== */
 
 /* ----- 1. Global base (QWidget) ----- */
@@ -35,54 +38,58 @@ QWidget {{
     font-size: 12px;
 }}
 
-/* ----- 2. QPushButton default (secondary style) ----- */
+/* ----- 2. QPushButton default (secondary / ghost style) ----- */
 QPushButton {{
     background: transparent;
-    border: 1px solid {t["border-hard"]};
+    border: 1px solid {t["ghost-border"]};
     color: {t["text-primary"]};
     border-radius: {t["r-l"]};
-    padding: 5px 14px;
+    padding: 6px 16px;
 }}
 
 QPushButton:hover {{
     background: {t["bg-hover"]};
+    color: {t["text-bright"]};
 }}
 
 QPushButton:pressed {{
     background: {t["bg-cell"]};
 }}
 
-/* ----- 3. QPushButton#btnPrimary ----- */
+/* ----- 3. QPushButton#btnPrimary — gradient CTA ----- */
 QPushButton#btnPrimary {{
-    background: {t["accent-primary"]};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 {t["primary"]}, stop:1 {t["primary-container"]});
     color: {t["text-on-cyan"]};
     border: none;
     border-radius: {t["r-l"]};
-    padding: 5px 18px;
-    font-weight: 600;
+    padding: 8px 24px;
+    font-weight: 700;
+    font-size: 13px;
 }}
 
 QPushButton#btnPrimary:hover {{
-    background: {t["bg-hover"]};
-    color: {t["text-bright"]};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 {t["primary-dim"]}, stop:1 {t["primary"]});
 }}
 
 QPushButton#btnPrimary:disabled {{
     background: {t["bg-selected"]};
-    opacity: 0.6;
+    color: {t["text-muted"]};
 }}
 
-/* ----- 4. QPushButton#btnSecondary ----- */
+/* ----- 4. QPushButton#btnSecondary — ghost border ----- */
 QPushButton#btnSecondary {{
     background: transparent;
-    border: 1px solid {t["border-hard"]};
+    border: 1px solid {t["ghost-border"]};
     color: {t["text-primary"]};
     border-radius: {t["r-l"]};
-    padding: 5px 14px;
+    padding: 6px 16px;
 }}
 
 QPushButton#btnSecondary:hover {{
     background: {t["bg-hover"]};
+    color: {t["text-bright"]};
 }}
 
 QPushButton#btnSecondary:pressed {{
@@ -92,47 +99,50 @@ QPushButton#btnSecondary:pressed {{
 /* ----- 5. QPushButton#btnDestructive ----- */
 QPushButton#btnDestructive {{
     background: transparent;
-    color: {t["red"]};
-    border: 1px solid {t["border-hard"]};
+    color: {t["error"]};
+    border: 1px solid {t["ghost-border"]};
     border-radius: {t["r-l"]};
-    padding: 5px 14px;
+    padding: 6px 16px;
 }}
 
 QPushButton#btnDestructive:hover {{
-    color: {t["red-dim"]};
+    color: {t["error-dim"]};
     background: {t["bg-hover"]};
 }}
 
 /* ----- 5b. QPushButton[button_role] property selectors ----- */
 QPushButton[button_role="primary"] {{
-    background: {t["accent-primary"]};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 {t["primary"]}, stop:1 {t["primary-container"]});
     color: {t["text-on-cyan"]};
     border: none;
     border-radius: {t["r-l"]};
-    padding: 5px 18px;
-    font-weight: 600;
+    padding: 8px 24px;
+    font-weight: 700;
+    font-size: 13px;
 }}
 
 QPushButton[button_role="primary"]:hover {{
-    background: {t["bg-hover"]};
-    color: {t["text-bright"]};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 {t["primary-dim"]}, stop:1 {t["primary"]});
 }}
 
 QPushButton[button_role="primary"]:disabled {{
     background: {t["bg-selected"]};
-    opacity: 0.6;
+    color: {t["text-muted"]};
 }}
 
 QPushButton[button_role="secondary"] {{
     background: transparent;
-    border: 1px solid {t["border-hard"]};
+    border: 1px solid {t["ghost-border"]};
     color: {t["text-primary"]};
     border-radius: {t["r-l"]};
-    padding: 5px 14px;
+    padding: 6px 16px;
 }}
 
 QPushButton[button_role="secondary"]:hover {{
     background: {t["bg-hover"]};
+    color: {t["text-bright"]};
 }}
 
 QPushButton[button_role="secondary"]:pressed {{
@@ -141,15 +151,38 @@ QPushButton[button_role="secondary"]:pressed {{
 
 QPushButton[button_role="destructive"] {{
     background: transparent;
-    color: {t["red"]};
-    border: 1px solid {t["border-hard"]};
+    color: {t["error"]};
+    border: 1px solid {t["ghost-border"]};
     border-radius: {t["r-l"]};
-    padding: 5px 14px;
+    padding: 6px 16px;
 }}
 
 QPushButton[button_role="destructive"]:hover {{
-    color: {t["red-dim"]};
+    color: {t["error-dim"]};
     background: {t["bg-hover"]};
+}}
+
+QPushButton[button_role="cta"] {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 {t["primary"]}, stop:1 {t["primary-container"]});
+    color: {t["text-on-cyan"]};
+    border: none;
+    border-radius: {t["r-l"]};
+    padding: 10px 28px;
+    font-family: {hl};
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: 1px;
+}}
+
+QPushButton[button_role="cta"]:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 {t["primary-dim"]}, stop:1 {t["primary"]});
+}}
+
+QPushButton[button_role="cta"]:disabled {{
+    background: {t["bg-selected"]};
+    color: {t["text-muted"]};
 }}
 
 /* ----- 6. Focus states ----- */
@@ -159,38 +192,43 @@ QTextEdit:focus,
 QPlainTextEdit:focus,
 QSpinBox:focus,
 QDoubleSpinBox:focus,
-QComboBox:focus,
-QCheckBox:focus,
-QRadioButton:focus,
-QSlider:focus,
-QTabBar::tab:focus {{
-    border: 2px solid {t["border-focus"]};
+QComboBox:focus {{
+    border: 1px solid {t["border-focus"]};
     outline: none;
 }}
 
-/* ----- 7. QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox ----- */
+/* ----- 7. Input wells — QLineEdit, QTextEdit, QSpinBox, QComboBox ----- */
 QLineEdit,
 QTextEdit,
 QSpinBox,
 QDoubleSpinBox,
 QComboBox {{
-    background: {t["bg-surface"]};
-    border: 1px solid {t["border-hard"]};
-    color: {t["text-primary"]};
+    background: {t["input-well"]};
+    border: 1px solid {t["ghost-border"]};
+    color: {t["text-bright"]};
     border-radius: {t["r-m"]};
-    padding: 6px 10px;
+    padding: 7px 12px;
+}}
+
+QLineEdit:focus,
+QTextEdit:focus,
+QSpinBox:focus,
+QDoubleSpinBox:focus,
+QComboBox:focus {{
+    border: 1px solid {t["border-focus"]};
 }}
 
 QComboBox::drop-down {{
     border: none;
-    width: 20px;
+    width: 24px;
 }}
 
 QComboBox QAbstractItemView {{
     background: {t["bg-panel"]};
-    border: 1px solid {t["border-hard"]};
+    border: 1px solid {t["ghost-border"]};
     selection-background-color: {t["bg-hover"]};
     color: {t["text-primary"]};
+    border-radius: {t["r-m"]};
 }}
 
 /* ----- 8. QCheckBox, QRadioButton ----- */
@@ -204,16 +242,15 @@ QCheckBox::indicator,
 QRadioButton::indicator {{
     width: 16px;
     height: 16px;
-    border: 1px solid {t["border-bright"]};
+    border: 1px solid {t["ghost-border"]};
     border-radius: {t["r-s"]};
-    background: {t["bg-surface"]};
+    background: {t["input-well"]};
 }}
 
 QCheckBox::indicator:checked,
 QRadioButton::indicator:checked {{
-    background: {t["accent-primary"]};
-    border-color: {t["accent-primary"]};
-    image: url(:/icons/check-white.png);
+    background: {t["primary"]};
+    border-color: {t["primary"]};
 }}
 
 /* ----- 9. QSlider ----- */
@@ -223,12 +260,26 @@ QSlider::groove:vertical {{
     border-radius: {t["r-s"]};
 }}
 
+QSlider::groove:horizontal {{
+    height: 4px;
+}}
+
+QSlider::groove:vertical {{
+    width: 4px;
+}}
+
 QSlider::handle:horizontal,
 QSlider::handle:vertical {{
-    background: {t["accent-primary"]};
-    border-radius: {t["r-m"]};
+    background: {t["primary"]};
+    border-radius: 7px;
     width: 14px;
     height: 14px;
+    margin: -5px 0;
+}}
+
+QSlider::sub-page:horizontal {{
+    background: {t["primary-dim"]};
+    border-radius: {t["r-s"]};
 }}
 
 /* ----- 10. QProgressBar ----- */
@@ -238,28 +289,33 @@ QProgressBar {{
     border: none;
     text-align: center;
     color: transparent;
+    min-height: 6px;
+    max-height: 6px;
 }}
 
 QProgressBar::chunk {{
-    background: {t["accent-primary"]};
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {t["primary"]}, stop:1 {t["secondary"]});
     border-radius: {t["r-s"]};
 }}
 
-/* ----- 11. QTableWidget, QTreeWidget ----- */
+/* ----- 11. QTableWidget, QTreeWidget — no gridlines, tonal hover ----- */
 QTableWidget,
 QTableView,
 QTreeWidget,
 QTreeView {{
     background: {t["bg-void"]};
-    border: 1px solid {t["border-hard"]};
-    gridline-color: {t["border-soft"]};
+    border: none;
+    gridline-color: transparent;
+    alternate-background-color: {t["bg-surface"]};
 }}
 
 QTableWidget::item,
 QTableView::item,
 QTreeWidget::item,
 QTreeView::item {{
-    padding: 4px 8px;
+    padding: 6px 10px;
+    border: none;
 }}
 
 QTableWidget::item:selected,
@@ -282,21 +338,28 @@ QHeaderView::section {{
     background: {t["bg-surface"]};
     color: {t["text-dim"]};
     border: none;
-    border-bottom: 1px solid {t["border-hard"]};
-    padding: 6px;
+    padding: 8px 10px;
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
 }}
 
 /* ----- 13. QScrollBar:vertical ----- */
 QScrollBar:vertical {{
-    background: {t["bg-void"]};
-    width: 8px;
+    background: transparent;
+    width: 6px;
     border: none;
+    margin: 2px;
 }}
 
 QScrollBar::handle:vertical {{
     background: {t["bg-cell"]};
-    border-radius: {t["r-s"]};
-    min-height: 20px;
+    border-radius: 3px;
+    min-height: 24px;
+}}
+
+QScrollBar::handle:vertical:hover {{
+    background: {t["bg-hover"]};
 }}
 
 QScrollBar::add-line:vertical,
@@ -312,15 +375,20 @@ QScrollBar::sub-page:vertical {{
 
 /* ----- 13b. QScrollBar:horizontal ----- */
 QScrollBar:horizontal {{
-    background: {t["bg-void"]};
-    height: 8px;
+    background: transparent;
+    height: 6px;
     border: none;
+    margin: 2px;
 }}
 
 QScrollBar::handle:horizontal {{
     background: {t["bg-cell"]};
-    border-radius: {t["r-s"]};
-    min-width: 20px;
+    border-radius: 3px;
+    min-width: 24px;
+}}
+
+QScrollBar::handle:horizontal:hover {{
+    background: {t["bg-hover"]};
 }}
 
 QScrollBar::add-line:horizontal,
@@ -338,90 +406,109 @@ QScrollBar::sub-page:horizontal {{
 QToolTip {{
     background: {t["bg-panel"]};
     color: {t["text-bright"]};
-    border: 1px solid {t["border-hard"]};
-    padding: 6px;
-    border-radius: 0px;
+    border: 1px solid {t["ghost-border"]};
+    padding: 6px 10px;
+    border-radius: {t["r-m"]};
 }}
 
-/* ----- 15. QWidget#sidebar ----- */
+/* ----- 15. QWidget#sidebar — tonal surface, no border ----- */
 QWidget#sidebar {{
     background: {t["bg-surface"]};
-    border-right: 1px solid {t["border-soft"]};
+    border: none;
 }}
 
-/* ----- 16. QPushButton#sidebarItem ----- */
+/* ----- 16. QPushButton#sidebarItem — tonal active, no left indicator ----- */
 QPushButton#sidebarItem {{
     background: transparent;
     color: {t["text-dim"]};
     text-align: left;
     border: none;
-    padding: 8px;
+    padding: 8px 12px;
     min-height: 32px;
-    border-radius: 0px;
+    border-radius: {t["r-m"]};
+    font-size: 12px;
 }}
 
 QPushButton#sidebarItem:checked {{
     background: {t["bg-cell"]};
-    color: {t["text-bright"]};
-    border-left: 2px solid {t["accent-primary"]};
+    color: {t["primary"]};
+    font-weight: 600;
 }}
 
 QPushButton#sidebarItem:hover:!checked {{
     background: {t["bg-hover"]};
+    color: {t["text-primary"]};
 }}
 
 /* ----- 17. QLabel#sidebarSection ----- */
 QLabel#sidebarSection {{
     font-size: 9px;
+    font-weight: 700;
     text-transform: uppercase;
-    color: {t["text-dim"]};
-    padding: 4px 8px;
+    color: {t["text-muted"]};
+    padding: 6px 12px 2px 12px;
+    letter-spacing: 1px;
 }}
 
-/* ----- 18. QLabel#pageTitle ----- */
+/* ----- 18. QLabel#pageTitle — Manrope headline ----- */
 QLabel#pageTitle {{
     color: {t["text-bright"]};
-    font-size: 18px;
-    font-weight: 600;
+    font-family: {hl};
+    font-size: 22px;
+    font-weight: 800;
 }}
 
 /* ----- 19. QLabel#pageDescription ----- */
 QLabel#pageDescription {{
-    color: {t["text-muted"]};
+    color: {t["text-dim"]};
     font-size: 12px;
 }}
 
 /* ----- 20. QWidget#logFeed ----- */
 QWidget#logFeed {{
     background: {t["bg-surface"]};
-    border: 1px solid {t["border-hard"]};
+    border: none;
+    border-radius: {t["r-l"]};
 }}
 
 /* ----- 21. QWidget#activityDrawer ----- */
 QWidget#activityDrawer {{
     background: {t["bg-surface"]};
-    border-top: 1px solid {t["border-hard"]};
+    border: none;
+    border-radius: {t["r-l"]};
 }}
 
-/* ----- 22. QWidget#dpanel (DataPanel) ----- */
+/* ----- 22. QWidget#dpanel (DataPanel) — tonal, rounded, no border ----- */
 QWidget#dpanel {{
-    background: {t["bg-surface"]};
-    border: 1px solid {t["border-hard"]};
+    background: {t["bg-panel"]};
+    border: none;
+    border-radius: {t["r-l"]};
+}}
+
+QWidget#dpanelHeader {{
+    background: transparent;
+}}
+
+QLabel#dpanelTitle {{
+    color: {t["text-bright"]};
+    font-family: {hl};
+    font-weight: 700;
+    font-size: 13px;
 }}
 
 /* ----- 23. QGroupBox ----- */
 QGroupBox {{
-    border: 1px solid {t["border-hard"]};
-    border-radius: {t["r-m"]};
+    border: 1px solid {t["ghost-border"]};
+    border-radius: {t["r-l"]};
     color: {t["text-dim"]};
     margin-top: 16px;
-    padding: 8px;
+    padding: 12px;
 }}
 
 QGroupBox::title {{
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    padding-left: 8px;
+    padding-left: 10px;
     padding-top: 2px;
     color: {t["text-dim"]};
 }}
@@ -429,8 +516,8 @@ QGroupBox::title {{
 /* ----- 24. QTabWidget, QTabBar ----- */
 QTabWidget::pane {{
     background: {t["bg-surface"]};
-    border: 1px solid {t["border-hard"]};
-    border-radius: {t["r-m"]};
+    border: none;
+    border-radius: {t["r-l"]};
 }}
 
 QTabBar::tab {{
@@ -442,8 +529,8 @@ QTabBar::tab {{
 }}
 
 QTabBar::tab:selected {{
-    color: {t["text-bright"]};
-    border-bottom: 2px solid {t["accent-primary"]};
+    color: {t["primary"]};
+    border-bottom: 2px solid {t["primary"]};
 }}
 
 QTabBar::tab:hover {{
@@ -455,11 +542,19 @@ QTabBar::tab:hover {{
 QMenu {{
     background: {t["bg-panel"]};
     color: {t["text-primary"]};
-    border: 1px solid {t["border-hard"]};
+    border: 1px solid {t["ghost-border"]};
+    border-radius: {t["r-m"]};
+    padding: 4px;
+}}
+
+QMenu::item {{
+    padding: 6px 24px 6px 12px;
+    border-radius: {t["r-s"]};
 }}
 
 QMenu::item:selected {{
     background: {t["bg-hover"]};
+    color: {t["text-bright"]};
 }}
 
 /* ----- 26. QDialog ----- */
@@ -470,15 +565,15 @@ QDialog {{
 
 /* ----- 27. QSplitter::handle ----- */
 QSplitter::handle {{
-    background: {t["bg-surface"]};
+    background: transparent;
 }}
 
 QSplitter::handle:vertical {{
-    height: 1px;
+    height: 2px;
 }}
 
 QSplitter::handle:horizontal {{
-    width: 1px;
+    width: 2px;
 }}
 
 /* ----- 28. Misc label helpers ----- */
@@ -497,18 +592,25 @@ QLabel#boldLabel {{
     color: {t["text-bright"]};
 }}
 
+QLabel#sectionLabel {{
+    color: {t["text-bright"]};
+    font-family: {hl};
+    font-weight: 700;
+    font-size: 13px;
+}}
+
 /* ----- 29. Data color properties ----- */
 QLabel[dataColor="cyan"] {{
-    color: {t["cyan"]};
+    color: {t["primary"]};
 }}
 QLabel[dataColor="green"] {{
-    color: {t["green"]};
+    color: {t["secondary"]};
 }}
 QLabel[dataColor="orange"] {{
     color: {t["orange"]};
 }}
 QLabel[dataColor="red"] {{
-    color: {t["red"]};
+    color: {t["error"]};
 }}
 QLabel[dataColor="dim"] {{
     color: {t["text-dim"]};
@@ -525,20 +627,23 @@ QScrollArea {{
 
 /* ----- 31. QStatusBar ----- */
 QStatusBar {{
-    background: {t["bg-panel"]};
+    background: {t["bg-surface"]};
     color: {t["text-muted"]};
     font-size: 10px;
-    border-top: 1px solid {t["border-hard"]};
+    border: none;
 }}
 
 /* ----- 32. QListWidget ----- */
 QListWidget {{
     background: {t["bg-void"]};
-    border: 1px solid {t["border-hard"]};
+    border: none;
+    border-radius: {t["r-m"]};
 }}
 
 QListWidget::item {{
-    padding: 4px 8px;
+    padding: 6px 10px;
+    border: none;
+    border-radius: {t["r-s"]};
 }}
 
 QListWidget::item:selected {{
@@ -553,5 +658,264 @@ QListWidget::item:hover {{
 /* ----- 33. Monospace text ----- */
 QTextEdit#monoText {{
     font-family: {font_mono};
+}}
+
+/* ----- 34. Stat cards & status dots ----- */
+QWidget#statCard {{
+    background: {t["bg-panel"]};
+    border: 1px solid {t["ghost-border"]};
+    border-radius: {t["r-l"]};
+    padding: 8px 12px;
+}}
+
+QLabel#statValue {{
+    color: {t["text-bright"]};
+    font-family: {hl};
+    font-size: 18px;
+    font-weight: 700;
+}}
+
+QLabel#statLabel {{
+    color: {t["text-muted"]};
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}}
+
+QLabel#statDot,
+QLabel#statusDot {{
+    min-width: 8px;
+    max-width: 8px;
+    min-height: 8px;
+    max-height: 8px;
+    border-radius: 4px;
+    background: {t["secondary"]};
+}}
+
+/* ----- 35. Status pills ----- */
+QLabel#statusTag {{
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: {t["r-s"]};
+}}
+
+QLabel#statusTag[color="cyan"] {{
+    color: {t["primary"]};
+    border: 1px solid {t["primary"]};
+}}
+
+QLabel#statusTag[color="green"] {{
+    color: {t["secondary"]};
+    border: 1px solid {t["secondary"]};
+}}
+
+QLabel#statusTag[color="orange"] {{
+    color: {t["orange"]};
+    border: 1px solid {t["orange"]};
+}}
+
+QLabel#statusTag[color="red"] {{
+    color: {t["error"]};
+    border: 1px solid {t["error"]};
+}}
+
+/* ----- 36. Header bar ----- */
+QWidget#headerBar {{
+    background: {t["bg-void"]};
+    border: none;
+    min-height: 48px;
+    max-height: 48px;
+}}
+
+QLabel#headerBrand {{
+    color: {t["primary"]};
+    font-family: {hl};
+    font-size: 14px;
+    font-weight: 800;
+}}
+
+QPushButton#headerTab {{
+    background: transparent;
+    color: {t["text-dim"]};
+    border: none;
+    padding: 4px 12px;
+    border-radius: {t["r-m"]};
+    font-size: 12px;
+    font-weight: 600;
+}}
+
+QPushButton#headerTab:checked {{
+    color: {t["text-bright"]};
+    background: {t["bg-cell"]};
+}}
+
+QPushButton#headerTab:hover:!checked {{
+    color: {t["text-primary"]};
+    background: {t["bg-hover"]};
+}}
+
+/* ----- 37. Status bar ----- */
+QWidget#statusBar {{
+    background: {t["bg-surface"]};
+    border: none;
+    min-height: 28px;
+    max-height: 32px;
+}}
+
+QLabel#statusBarText {{
+    color: {t["text-muted"]};
+    font-size: 10px;
+}}
+
+QLabel#statusBarMeta {{
+    color: {t["text-muted"]};
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}}
+
+/* ----- 38. Sidebar branding ----- */
+QLabel#appTitle {{
+    color: {t["primary"]};
+    font-family: {hl};
+    font-size: 15px;
+    font-weight: 800;
+    padding: 0px 4px;
+}}
+
+QLabel#appSubtitle {{
+    color: {t["text-muted"]};
+    font-size: 10px;
+    padding: 0px 4px;
+}}
+
+/* ----- 39. Sidebar CTA button ----- */
+QPushButton#sidebarCta {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 {t["primary"]}, stop:1 {t["primary-container"]});
+    color: {t["text-on-cyan"]};
+    border: none;
+    border-radius: {t["r-m"]};
+    padding: 8px 16px;
+    font-family: {hl};
+    font-weight: 700;
+    font-size: 11px;
+}}
+
+QPushButton#sidebarCta:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 {t["primary-dim"]}, stop:1 {t["primary"]});
+}}
+
+/* ----- 40. Collapsible section ----- */
+QFrame#collapsibleSection {{
+    background: transparent;
+    border: none;
+}}
+
+QLabel#collapsibleTitle {{
+    color: {t["text-bright"]};
+    font-weight: 600;
+    font-size: 12px;
+}}
+
+QPushButton#collapsibleToggle {{
+    background: transparent;
+    color: {t["text-dim"]};
+    border: none;
+    font-size: 12px;
+}}
+
+/* ----- 41. ConfigBar ----- */
+QWidget#configBar {{
+    background: {t["bg-panel"]};
+    border: none;
+    border-radius: {t["r-l"]};
+    padding: 4px 8px;
+}}
+
+QLabel#configLabel {{
+    color: {t["text-muted"]};
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}}
+
+/* ----- 42. Split layout ----- */
+QWidget#splitLayout {{
+    background: transparent;
+}}
+
+QWidget#splitLeft,
+QWidget#splitRight {{
+    background: transparent;
+}}
+
+/* ----- 43. Empty state ----- */
+QWidget#emptyState {{
+    background: transparent;
+}}
+
+QLabel#emptyStateIcon {{
+    font-size: 36px;
+    color: {t["text-muted"]};
+}}
+
+QLabel#emptyStateTitle {{
+    color: {t["text-dim"]};
+    font-family: {hl};
+    font-size: 16px;
+    font-weight: 700;
+}}
+
+QLabel#emptyStateDesc {{
+    color: {t["text-muted"]};
+    font-size: 12px;
+}}
+
+/* ----- 44. Activity drawer ----- */
+QPushButton#activityDrawerToggle {{
+    background: transparent;
+    color: {t["text-dim"]};
+    border: none;
+    font-weight: 600;
+    font-size: 12px;
+    text-align: left;
+    padding: 4px 0px;
+}}
+
+QPushButton#activityDrawerToggle:hover {{
+    color: {t["text-primary"]};
+}}
+
+QLabel#activityDrawerBadge {{
+    color: {t["text-muted"]};
+    font-size: 10px;
+}}
+
+/* ----- 45. Page header stats ----- */
+QWidget#pageHeader {{
+    background: transparent;
+}}
+
+/* ----- 46. Source folder bar ----- */
+QWidget#sourceFolderBar {{
+    background: transparent;
+}}
+
+/* ----- 47. Log entries ----- */
+QLabel#logTimestamp {{
+    color: {t["text-muted"]};
+    font-family: {font_mono};
+    font-size: 10px;
+}}
+
+QLabel#logMessage {{
+    color: {t["text-primary"]};
+    font-size: 11px;
 }}
 """

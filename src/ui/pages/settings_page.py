@@ -121,7 +121,7 @@ class SettingsPage(QWidget):
 
         button_row = QHBoxLayout()
         self.install_button = QPushButton("Install Playwright Browsers...")
-        self.install_button.setObjectName("btnCyan")
+        self.install_button.setObjectName("btnPrimary")
         self.install_button.setProperty("button_role", "primary")
         self.install_button.setAccessibleName("Install Playwright Browsers")
         self.install_button.setAccessibleDescription(

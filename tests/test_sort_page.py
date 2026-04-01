@@ -53,9 +53,9 @@ def test_sort_page_one_primary_action(qapp):
     from src.ui.pages.sort_page import SortPage
     from PyQt6.QtWidgets import QPushButton
     page = SortPage()
-    primaries = [
+    ctas = [
         btn for btn in page.findChildren(QPushButton)
-        if btn.property("button_role") == "primary"
+        if btn.property("button_role") == "cta"
     ]
-    assert len(primaries) == 1
-    assert primaries[0].text() == "Sort Files"
+    assert len(ctas) == 1
+    assert ctas[0].text() == "SORT FILES"

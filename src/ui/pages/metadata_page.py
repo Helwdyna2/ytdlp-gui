@@ -70,8 +70,8 @@ class MetadataPage(QWidget):
     def _setup_ui(self) -> None:
         """Build the full page layout."""
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(12)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(16)
 
         # 1. Page header
         root.addWidget(
@@ -109,7 +109,7 @@ class MetadataPage(QWidget):
         self._scan_status = QLabel("")
         self._scan_status.setVisible(False)
         self._scan_cancel_btn = QPushButton("Cancel")
-        self._scan_cancel_btn.setObjectName("btnDanger")
+        self._scan_cancel_btn.setObjectName("btnDestructive")
         self._scan_cancel_btn.setProperty("button_role", "destructive")
         self._scan_cancel_btn.setVisible(False)
         progress_row.addWidget(self._scan_progress)
@@ -118,7 +118,7 @@ class MetadataPage(QWidget):
         root.addLayout(progress_row)
 
         # 3. SplitLayout — file list left, detail tabs right
-        split = SplitLayout(right_width=400)
+        split = SplitLayout(right_width=400, gap=20)
 
         # --- LEFT panel: file count label + list ---
         left_layout = QVBoxLayout(split.left_panel)

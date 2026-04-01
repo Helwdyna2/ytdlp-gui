@@ -111,7 +111,7 @@ class QueueProgressWidget(QWidget):
         btn_layout.addWidget(self.cancel_btn)
 
         self.start_btn = QPushButton("&Start Download")
-        self.start_btn.setObjectName("btnCyan")
+        self.start_btn.setObjectName("btnPrimary")
         self.start_btn.setProperty("button_role", "primary")
         self.start_btn.setAccessibleName("Start Download")
         self.start_btn.setAccessibleDescription("Start downloading all queued URLs")

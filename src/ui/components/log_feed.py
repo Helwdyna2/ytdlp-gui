@@ -1,4 +1,4 @@
-"""LogFeed — Signal Deck structured log display.
+"""LogFeed — Digital Obsidian structured log display.
 
 Replaces plain QTextEdit log areas with a structured, themed log feed
 featuring timestamps, colored level tags, and auto-scroll.
@@ -22,23 +22,12 @@ logger = logging.getLogger(__name__)
 
 
 class StatusTag(QLabel):
-    """Inline colored pill label for log level display."""
-
-    _COLOR_MAP = {
-        "cyan": "#06b6d4",
-        "green": "#22c55e",
-        "orange": "#f97316",
-        "red": "#ef4444",
-        "yellow": "#eab308",
-    }
+    """Inline status pill styled via QSS dynamic properties."""
 
     def __init__(self, text: str, color: str = "cyan", parent=None):
         super().__init__(text, parent)
-        hex_color = self._COLOR_MAP.get(color, "#06b6d4")
-        self.setStyleSheet(
-            f"color: {hex_color}; font-size: 10px; font-weight: bold;"
-            f" padding: 1px 4px; border: 1px solid {hex_color}; border-radius: 3px;"
-        )
+        self.setObjectName("statusTag")
+        self.setProperty("color", color)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
 _LEVEL_MAP = {

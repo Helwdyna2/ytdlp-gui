@@ -59,7 +59,7 @@ class FilePickerWidget(QWidget):
         url_file_layout.addWidget(self.url_file_browse_btn)
 
         self.url_file_load_btn = QPushButton("Load")
-        self.url_file_load_btn.setObjectName("btnCyan")
+        self.url_file_load_btn.setObjectName("btnPrimary")
         self.url_file_load_btn.setProperty("button_role", "primary")
         self.url_file_load_btn.clicked.connect(self._load_url_file)
         self.url_file_load_btn.setEnabled(False)

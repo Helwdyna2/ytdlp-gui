@@ -56,7 +56,7 @@ def test_sidebar_title_text(qapp):
     from PyQt6.QtWidgets import QLabel
     titles = [w for w in sb.findChildren(QLabel) if w.objectName() == "appTitle"]
     assert len(titles) == 1
-    assert titles[0].text() == "yt-dlp GUI"
+    assert titles[0].text() == "Media Core"
 
 
 def test_sidebar_subtitle_text(qapp):
@@ -65,14 +65,14 @@ def test_sidebar_subtitle_text(qapp):
     sb = Sidebar()
     subtitles = [w for w in sb.findChildren(QLabel) if w.objectName() == "appSubtitle"]
     assert len(subtitles) == 1
-    assert subtitles[0].text() == "Download, convert, and organize media"
+    assert subtitles[0].text() == "Download · Convert · Organize"
 
 
-def test_sidebar_fixed_width_190(qapp):
+def test_sidebar_fixed_width_220(qapp):
     from src.ui.components.sidebar import Sidebar
     sb = Sidebar()
-    assert sb.maximumWidth() == 190
-    assert sb.minimumWidth() == 190
+    assert sb.maximumWidth() == 220
+    assert sb.minimumWidth() == 220
 
 
 def test_sidebar_section_headers_not_clickable(qapp):

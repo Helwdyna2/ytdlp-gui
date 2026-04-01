@@ -42,11 +42,13 @@ class SourceFolderBar(QWidget):
         self._path_edit.setObjectName("sourceFolderPath")
 
         self._browse_btn = QPushButton("Browse")
-        self._browse_btn.setObjectName("btnDefault")
+        self._browse_btn.setObjectName("btnWire")
+        self._browse_btn.setProperty("button_role", "secondary")
         self._browse_btn.clicked.connect(self._on_browse)
 
         self._scan_btn = QPushButton("Scan")
-        self._scan_btn.setObjectName("btnCyan")
+        self._scan_btn.setObjectName("btnPrimary")
+        self._scan_btn.setProperty("button_role", "primary")
         self._scan_btn.clicked.connect(self._on_scan)
         self._scan_btn.setVisible(show_scan)
 

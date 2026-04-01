@@ -51,19 +51,19 @@ def test_match_page_scan_is_secondary(qapp):
 def test_match_page_start_matching_is_primary(qapp):
     from src.ui.pages.match_page import MatchPage
     page = MatchPage()
-    assert page.match_button.property("button_role") == "primary"
+    assert page.match_button.property("button_role") == "cta"
 
 
 def test_match_page_one_primary_action(qapp):
     from src.ui.pages.match_page import MatchPage
     from PyQt6.QtWidgets import QPushButton
     page = MatchPage()
-    primaries = [
+    ctas = [
         btn for btn in page.findChildren(QPushButton)
-        if btn.property("button_role") == "primary"
+        if btn.property("button_role") == "cta"
     ]
-    assert len(primaries) == 1, f"Expected 1 primary button, found {len(primaries)}"
-    assert primaries[0].text() == "Start Matching"
+    assert len(ctas) == 1, f"Expected 1 CTA button, found {len(ctas)}"
+    assert ctas[0].text() == "START MATCHING"
 
 
 def test_match_page_auth_guidance_uses_add_urls(qapp):

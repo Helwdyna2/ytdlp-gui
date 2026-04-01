@@ -8,12 +8,12 @@ class PageHeader(QWidget):
         self.setObjectName("pageHeader")
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 0, 12)
         layout.setSpacing(16)
 
         # Left: title + description stacked
         text_col = QVBoxLayout()
-        text_col.setSpacing(2)
+        text_col.setSpacing(4)
 
         self.title_label = QLabel(title)
         self.title_label.setObjectName("pageTitle")
@@ -26,10 +26,11 @@ class PageHeader(QWidget):
         layout.addLayout(text_col)
         layout.addStretch()
 
-        # Right: stats area
+        # Right: stat cards area
         self._stats_layout = QHBoxLayout()
-        self._stats_layout.setSpacing(24)
+        self._stats_layout.setSpacing(12)
         self._stat_value_labels: dict[str, QLabel] = {}
+        self._stat_cards: dict[str, QWidget] = {}
         layout.addLayout(self._stats_layout)
 
     def set_title(self, text: str) -> None:
@@ -39,21 +40,27 @@ class PageHeader(QWidget):
         self.description_label.setText(text)
 
     def add_stat(self, label: str, value: str, color: str | None = None) -> None:
-        col = QVBoxLayout()
-        col.setSpacing(0)
+        card = QWidget()
+        card.setObjectName("statCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(12, 8, 12, 8)
+        card_layout.setSpacing(2)
 
         val_label = QLabel(value)
         val_label.setObjectName("statValue")
+        val_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if color:
             val_label.setProperty("dataColor", color)
 
         lbl_label = QLabel(label.upper())
         lbl_label.setObjectName("statLabel")
+        lbl_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        col.addWidget(val_label)
-        col.addWidget(lbl_label)
-        self._stats_layout.addLayout(col)
+        card_layout.addWidget(val_label)
+        card_layout.addWidget(lbl_label)
+        self._stats_layout.addWidget(card)
         self._stat_value_labels[label] = val_label
+        self._stat_cards[label] = card
 
     def update_stat(self, label: str, value: str, color: str | None = None) -> None:
         if label in self._stat_value_labels:

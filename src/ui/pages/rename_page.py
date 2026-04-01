@@ -342,8 +342,8 @@ class RenamePage(QWidget):
     def _setup_ui(self) -> None:
         """Build the full page layout."""
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(12)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(16)
 
         # 1. Page header
         root.addWidget(
@@ -361,10 +361,12 @@ class RenamePage(QWidget):
         self._source_input.setPlaceholderText("Choose a folder to rename files in…")
         source_row.addWidget(self._source_input, stretch=1)
         self._browse_btn = QPushButton("Browse")
-        self._browse_btn.setObjectName("btnDefault")
+        self._browse_btn.setObjectName("btnWire")
+        self._browse_btn.setProperty("button_role", "secondary")
         source_row.addWidget(self._browse_btn)
         self._scan_btn = QPushButton("Scan")
-        self._scan_btn.setObjectName("btnCyan")
+        self._scan_btn.setObjectName("btnPrimary")
+        self._scan_btn.setProperty("button_role", "primary")
         self._scan_btn.setEnabled(False)
         source_row.addWidget(self._scan_btn)
         root.addLayout(source_row)
@@ -385,7 +387,7 @@ class RenamePage(QWidget):
         split_container.setObjectName("splitLayout")
         split_h = QHBoxLayout(split_container)
         split_h.setContentsMargins(0, 0, 0, 0)
-        split_h.setSpacing(16)
+        split_h.setSpacing(20)
 
         # --- LEFT panel (fixed 260px): token builder ---
         left_panel = QWidget()
@@ -524,10 +526,11 @@ class RenamePage(QWidget):
         self._refresh_btn.setProperty("button_role", "secondary")
         self._refresh_btn.setEnabled(False)
 
-        self._apply_btn = QPushButton("Apply Rename")
+        self._apply_btn = QPushButton("APPLY RENAME")
         self._apply_btn.setObjectName("btnPrimary")
-        self._apply_btn.setProperty("button_role", "primary")
+        self._apply_btn.setProperty("button_role", "cta")
         self._apply_btn.setEnabled(False)
+        self._apply_btn.setMinimumWidth(140)
 
         action_row.addWidget(self._refresh_btn)
         action_row.addWidget(self._apply_btn)

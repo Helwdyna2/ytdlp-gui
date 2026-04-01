@@ -1,4 +1,4 @@
-"""Collapsible section with a clickable header and expandable content."""
+"""Collapsible section — tonal header, no visible border box."""
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
 
 
 class CollapsibleSection(QFrame):
-    """A section with a header that toggles content visibility."""
+    """A section with a tonal header row that toggles content visibility."""
 
     def __init__(
         self,
@@ -44,8 +44,8 @@ class CollapsibleSection(QFrame):
         self._title_label.mousePressEvent = lambda _e: self._toggle_btn.click()
 
         header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(6)
+        header.setContentsMargins(0, 4, 0, 4)
+        header.setSpacing(8)
         header.addWidget(self._toggle_btn)
         header.addWidget(self._title_label)
         header.addStretch()
@@ -54,7 +54,7 @@ class CollapsibleSection(QFrame):
         self._content = QWidget()
         self._content.setObjectName("collapsibleContent")
         self._content_layout = QVBoxLayout(self._content)
-        self._content_layout.setContentsMargins(26, 4, 0, 0)
+        self._content_layout.setContentsMargins(28, 8, 0, 0)
         self._content_layout.setSpacing(8)
         self._content.setVisible(expanded)
 

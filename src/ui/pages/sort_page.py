@@ -234,8 +234,8 @@ class SortPage(QWidget):
     def _setup_ui(self) -> None:
         """Build the full page layout."""
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(12)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(16)
 
         # 1. Page header
         root.addWidget(
@@ -254,10 +254,12 @@ class SortPage(QWidget):
         self._source_input.setReadOnly(True)
         source_row.addWidget(self._source_input, stretch=1)
         self._source_browse_btn = QPushButton("Browse")
-        self._source_browse_btn.setObjectName("btnDefault")
+        self._source_browse_btn.setObjectName("btnWire")
+        self._source_browse_btn.setProperty("button_role", "secondary")
         source_row.addWidget(self._source_browse_btn)
         self._scan_btn = QPushButton("Scan")
-        self._scan_btn.setObjectName("btnCyan")
+        self._scan_btn.setObjectName("btnPrimary")
+        self._scan_btn.setProperty("button_role", "primary")
         self._scan_btn.setEnabled(False)
         source_row.addWidget(self._scan_btn)
         root.addLayout(source_row)
@@ -278,7 +280,7 @@ class SortPage(QWidget):
         root.addLayout(scan_progress_row)
 
         # 4. SplitLayout: criteria left, preview right
-        split = SplitLayout(right_width=320)
+        split = SplitLayout(right_width=340, gap=20)
 
         # --- LEFT panel: drag-reorderable criteria list ---
         left_layout = QVBoxLayout(split.left_panel)
@@ -401,10 +403,11 @@ class SortPage(QWidget):
         self._cancel_btn.setProperty("button_role", "secondary")
         self._cancel_btn.setVisible(False)
 
-        self._sort_btn = QPushButton("Sort Files")
+        self._sort_btn = QPushButton("SORT FILES")
         self._sort_btn.setObjectName("btnPrimary")
-        self._sort_btn.setProperty("button_role", "primary")
+        self._sort_btn.setProperty("button_role", "cta")
         self._sort_btn.setEnabled(False)
+        self._sort_btn.setMinimumWidth(140)
 
         action_row.addWidget(self._cancel_btn)
         action_row.addWidget(self._sort_btn)

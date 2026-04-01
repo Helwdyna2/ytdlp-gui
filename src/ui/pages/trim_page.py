@@ -207,11 +207,11 @@ class TrimPage(QWidget):
 
         action_row.addStretch()
 
-        self._trim_btn = QPushButton("Trim Video")
+        self._trim_btn = QPushButton("TRIM VIDEO")
         self._trim_btn.setObjectName("btnPrimary")
-        self._trim_btn.setProperty("button_role", "primary")
+        self._trim_btn.setProperty("button_role", "cta")
         self._trim_btn.setEnabled(False)
-        self._trim_btn.setMinimumWidth(120)
+        self._trim_btn.setMinimumWidth(140)
         action_row.addWidget(self._trim_btn)
 
         main_layout.addLayout(action_row)

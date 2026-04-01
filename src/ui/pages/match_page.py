@@ -74,8 +74,8 @@ class MatchPage(QWidget):
     def _setup_ui(self) -> None:
         """Build the full page layout."""
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(12)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(16)
 
         # 1. Page header
         root.addWidget(
@@ -86,7 +86,7 @@ class MatchPage(QWidget):
         )
 
         # 2. SplitLayout
-        split = SplitLayout(right_width=500)
+        split = SplitLayout(right_width=500, gap=20)
 
         # ------------------------------------------------------------------
         # LEFT panel
@@ -104,7 +104,8 @@ class MatchPage(QWidget):
         self._source_input.setReadOnly(True)
         source_row.addWidget(self._source_input, stretch=1)
         self._source_browse_btn = QPushButton("Browse")
-        self._source_browse_btn.setObjectName("btnDefault")
+        self._source_browse_btn.setObjectName("btnWire")
+        self._source_browse_btn.setProperty("button_role", "secondary")
         source_row.addWidget(self._source_browse_btn)
         left_layout.addLayout(source_row)
 
@@ -164,12 +165,13 @@ class MatchPage(QWidget):
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
         self.scan_button = QPushButton("Scan Folder")
-        self.scan_button.setObjectName("btnCyan")
+        self.scan_button.setObjectName("btnWire")
         self.scan_button.setProperty("button_role", "secondary")
-        self.match_button = QPushButton("Start Matching")
+        self.match_button = QPushButton("START MATCHING")
         self.match_button.setObjectName("btnPrimary")
-        self.match_button.setProperty("button_role", "primary")
+        self.match_button.setProperty("button_role", "cta")
         self.match_button.setEnabled(False)
+        self.match_button.setMinimumWidth(140)
         action_row.addWidget(self.scan_button)
         action_row.addWidget(self.match_button)
         action_row.addStretch()

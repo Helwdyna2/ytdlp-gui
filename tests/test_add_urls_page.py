@@ -39,7 +39,7 @@ def test_add_urls_page_header_stats(qapp):
 def test_add_urls_page_start_btn_is_primary(qapp):
     from src.ui.pages.add_urls_page import AddUrlsPage
     page = AddUrlsPage()
-    assert page._start_btn.property("button_role") == "primary"
+    assert page._start_btn.property("button_role") == "cta"
 
 
 def test_add_urls_page_cancel_btn_is_secondary(qapp):

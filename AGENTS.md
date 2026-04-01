@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+# Virtual Environment
+
+Use the existing virtual environment always. If you need to create a new one, use `python -m venv .venv` and activate it with `source .venv/bin/activate` (Unix) or `.venv\Scripts\activate` (Windows). Then install dependencies with `pip install -r requirements-dev.txt`. Do not commit the virtual environment directory or any generated files under `data/`.
+
 ## Project Structure & Module Organization
 The application is a Python desktop GUI built around `PyQt6`. Main entry points are `run.py` for development and `main.py` for packaged runs. Core code lives under `src/`:
 

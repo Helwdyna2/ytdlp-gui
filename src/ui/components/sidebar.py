@@ -1,4 +1,4 @@
-"""Sidebar navigation component with flat nav and sections."""
+"""Sidebar navigation component — Digital Obsidian design system."""
 
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
@@ -26,15 +26,28 @@ SECTIONS = [
 ]
 SETTINGS_ITEM = ("settings", "Settings")
 
+# Map tool keys to header sections for cross-wiring
+TOOL_SECTION_MAP = {
+    "add_urls": "downloads",
+    "extract_urls": "downloads",
+    "convert": "processing",
+    "trim": "processing",
+    "metadata": "processing",
+    "sort": "organization",
+    "rename": "organization",
+    "match": "organization",
+    "settings": "organization",
+}
+
 
 class Sidebar(QWidget):
-    """Flat sidebar navigation with sections, icons, and badges."""
+    """Flat sidebar navigation with branding, sections, icons, badges, and CTA."""
 
     tool_selected = pyqtSignal(str)
 
     def __init__(self, parent: QWidget = None) -> None:
         super().__init__(parent)
-        self.setFixedWidth(190)
+        self.setFixedWidth(220)
         self.setObjectName("sidebar")
 
         self._buttons: dict[str, QPushButton] = {}
@@ -49,17 +62,12 @@ class Sidebar(QWidget):
         if first_key in self._buttons:
             self._buttons[first_key].setChecked(True)
 
-    def _make_separator(self) -> QFrame:
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
-        return line
-
     def _make_tool_button(self, key: str, label: str) -> QPushButton:
         btn = QPushButton(label)
         btn.setObjectName("sidebarItem")
         btn.setCheckable(True)
         btn.setIcon(get_icon(key))
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._buttons[key] = btn
         self._labels[key] = label
         self._button_group.addButton(btn)
@@ -68,22 +76,19 @@ class Sidebar(QWidget):
 
     def _build_layout(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 12, 8, 12)
+        layout.setContentsMargins(12, 16, 12, 16)
         layout.setSpacing(2)
 
-        # App title
-        title = QLabel("yt-dlp GUI")
+        # Branding
+        title = QLabel("Media Core")
         title.setObjectName("appTitle")
         layout.addWidget(title)
 
-        # App subtitle
-        subtitle = QLabel("Download, convert, and organize media")
+        subtitle = QLabel("Download · Convert · Organize")
         subtitle.setObjectName("appSubtitle")
         layout.addWidget(subtitle)
 
-        # Separator
-        layout.addWidget(self._make_separator())
-        layout.addSpacing(4)
+        layout.addSpacing(16)
 
         # Sections
         for section_name, tools in SECTIONS:
@@ -95,17 +100,23 @@ class Sidebar(QWidget):
                 btn = self._make_tool_button(key, label)
                 layout.addWidget(btn)
 
-            layout.addSpacing(6)
+            layout.addSpacing(8)
 
-        # Spacer to push settings to bottom
+        # Spacer
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         layout.addWidget(spacer)
 
-        # Bottom separator
-        layout.addWidget(self._make_separator())
+        # CTA button
+        self._cta_btn = QPushButton("New Batch")
+        self._cta_btn.setObjectName("sidebarCta")
+        self._cta_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._cta_btn.clicked.connect(lambda: self.tool_selected.emit("add_urls"))
+        layout.addWidget(self._cta_btn)
 
-        # Settings button
+        layout.addSpacing(8)
+
+        # Bottom utility links
         settings_key, settings_label = SETTINGS_ITEM
         settings_btn = self._make_tool_button(settings_key, settings_label)
         layout.addWidget(settings_btn)
@@ -117,7 +128,7 @@ class Sidebar(QWidget):
             self.tool_selected.emit(key)
 
     def set_badge(self, key: str, count: int) -> None:
-        """Show/hide a badge count on a sidebar item (visual only)."""
+        """Show/hide a badge count on a sidebar item."""
         if key in self._buttons:
             btn = self._buttons[key]
             base = self._labels[key]

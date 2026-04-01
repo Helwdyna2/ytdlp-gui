@@ -12,16 +12,14 @@ class ConfigBar(QWidget):
         self._layout.setSpacing(16)
 
     def add_field(self, label: str, widget: QWidget) -> None:
-        lbl = QLabel(label)
+        lbl = QLabel(label.upper())
         lbl.setObjectName("configLabel")
         self._layout.addWidget(lbl)
         self._layout.addWidget(widget)
 
     def add_separator(self) -> None:
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.VLine)
-        line.setFrameShadow(QFrame.Shadow.Plain)
-        self._layout.addWidget(line)
+        # Replaced visual separator with spacing for Digital Obsidian
+        self._layout.addSpacing(8)
 
     def add_stretch(self) -> None:
         self._layout.addStretch()

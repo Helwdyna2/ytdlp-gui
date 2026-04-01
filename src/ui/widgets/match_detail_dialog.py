@@ -96,7 +96,8 @@ class MatchDetailDialog(QDialog):
         self.cancel_button.clicked.connect(self.reject)
 
         self.apply_button = QPushButton("Apply Selected")
-        self.apply_button.setObjectName("btnCyan")
+        self.apply_button.setObjectName("btnPrimary")
+        self.apply_button.setProperty("button_role", "primary")
         self.apply_button.clicked.connect(self._on_apply_clicked)
         self.apply_button.setEnabled(False)
 

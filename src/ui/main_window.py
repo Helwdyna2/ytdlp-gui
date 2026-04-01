@@ -523,6 +523,7 @@ class MainWindow(QMainWindow):
         self.queue_progress_widget.set_running(True)
         self._set_input_enabled(False)
         self.add_urls_page.set_download_mode(True)
+        self.shell.status_bar.set_status("Downloading…")
 
     def _on_download_started(self, url: str, title: str):
         """Handle individual download started."""
@@ -584,6 +585,7 @@ class MainWindow(QMainWindow):
         self.queue_progress_widget.set_running(False)
         self._set_input_enabled(True)
         self.add_urls_page.set_download_mode(False)
+        self.shell.status_bar.set_status("Idle")
 
         # Clear completed from progress widget after a delay
         QTimer.singleShot(2000, self.progress_widget.clear_completed)
@@ -723,12 +725,13 @@ class MainWindow(QMainWindow):
         )
 
     def _update_footer_bar(self):
-        """Update footer bar with dependency status."""
+        """Update status bar with dependency status."""
         import shutil
 
         ytdlp = shutil.which("yt-dlp")
         ffmpeg = shutil.which("ffmpeg")
-        # Footer bar has been removed from the new shell; log dependency status instead
+        self.shell.status_bar.set_metadata("yt-dlp", "OK" if ytdlp else "Not found")
+        self.shell.status_bar.set_metadata("ffmpeg", "OK" if ffmpeg else "Not found")
         if not ytdlp:
             logger.warning("yt-dlp not found in PATH")
         if not ffmpeg:

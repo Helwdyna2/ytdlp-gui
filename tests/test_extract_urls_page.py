@@ -36,7 +36,7 @@ def test_extract_urls_page_status_copy(qapp):
 def test_extract_urls_primary_action_is_extract(qapp):
     from src.ui.pages.extract_urls_page import ExtractUrlsPage
     page = ExtractUrlsPage()
-    assert page.extract_button.property("button_role") == "primary"
+    assert page.extract_button.property("button_role") == "cta"
 
 
 def test_extract_urls_stop_is_secondary(qapp):

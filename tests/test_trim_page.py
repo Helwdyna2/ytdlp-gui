@@ -47,18 +47,18 @@ def test_trim_page_one_primary_action(qapp):
     from src.ui.pages.trim_page import TrimPage
     from PyQt6.QtWidgets import QPushButton
     page = TrimPage()
-    primaries = [
+    ctas = [
         btn for btn in page.findChildren(QPushButton)
-        if btn.property("button_role") == "primary"
+        if btn.property("button_role") == "cta"
     ]
-    assert len(primaries) == 1, f"Expected 1 primary button, found {len(primaries)}"
-    assert primaries[0].text() == "Trim Video"
+    assert len(ctas) == 1, f"Expected 1 CTA button, found {len(ctas)}"
+    assert ctas[0].text() == "TRIM VIDEO"
 
 
 def test_trim_page_trim_btn_role(qapp):
     from src.ui.pages.trim_page import TrimPage
     page = TrimPage()
-    assert page._trim_btn.property("button_role") == "primary"
+    assert page._trim_btn.property("button_role") == "cta"
 
 
 def test_trim_page_cancel_btn_role(qapp):

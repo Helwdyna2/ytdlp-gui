@@ -20,3 +20,7 @@ send2trash
 
 # Icon fonts for Qt
 qtawesome
+
+# Video preview and timeline
+mpv
+superqt

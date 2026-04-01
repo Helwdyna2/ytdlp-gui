@@ -1,15 +1,37 @@
-"""Centralized theme engine for the application."""
+"""Centralized theme engine for the Digital Obsidian design system."""
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtGui import QFontDatabase
 from PyQt6.QtWidgets import QApplication
 
-from .tokens import DARK_TOKENS, LIGHT_TOKENS, FONT_BODY, FONT_MONO
+from .tokens import DARK_TOKENS, LIGHT_TOKENS, FONT_BODY, FONT_MONO, FONT_HEADLINE
 from .qss_builder import build_qss
 
 logger = logging.getLogger(__name__)
+
+_FONTS_DIR = Path(__file__).parent / "fonts"
+
+
+def _load_fonts() -> None:
+    """Register bundled Manrope and Inter fonts with the Qt font database."""
+    if not _FONTS_DIR.is_dir():
+        logger.warning("Fonts directory not found: %s", _FONTS_DIR)
+        return
+
+    loaded = 0
+    for font_file in sorted(_FONTS_DIR.iterdir()):
+        if font_file.suffix.lower() in (".ttf", ".otf"):
+            font_id = QFontDatabase.addApplicationFont(str(font_file))
+            if font_id < 0:
+                logger.warning("Failed to load font: %s", font_file.name)
+            else:
+                loaded += 1
+    if loaded:
+        logger.info("Loaded %d bundled fonts from %s", loaded, _FONTS_DIR)
 
 
 class ThemeEngine(QObject):
@@ -21,17 +43,14 @@ class ThemeEngine(QObject):
         engine.toggle_theme()    # Switch between dark/light
         engine.apply_theme(app)  # Re-apply after switch
 
-        # Or set and apply in one step:
-        engine.set_theme("light")
-        engine.apply_theme(app)
-
         # Get current token values:
-        color = engine.get_color("cyan")  # "#00d4ff" in dark mode
+        color = engine.get_color("primary")
     """
 
     theme_changed = pyqtSignal(str)  # Emits "dark" or "light"
 
     _instance: Optional["ThemeEngine"] = None
+    _fonts_loaded: bool = False
 
     def __new__(cls):
         if cls._instance is None:
@@ -66,8 +85,13 @@ class ThemeEngine(QObject):
 
     def apply_theme(self, app: QApplication) -> None:
         """Generate QSS from current theme tokens and apply to the application."""
+        # Load bundled fonts once
+        if not ThemeEngine._fonts_loaded:
+            _load_fonts()
+            ThemeEngine._fonts_loaded = True
+
         tokens = self._tokens[self._current_theme]
-        qss = build_qss(tokens, FONT_BODY, FONT_MONO)
+        qss = build_qss(tokens, FONT_BODY, FONT_MONO, font_headline=FONT_HEADLINE)
         app.setStyleSheet(qss)
         logger.info(f"Applied {self._current_theme} theme ({len(qss)} chars QSS)")
 

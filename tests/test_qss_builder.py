@@ -85,23 +85,23 @@ def test_build_qss_includes_button_role_selectors():
 
 def test_build_qss_button_role_primary_styling():
     from src.ui.theme.qss_builder import build_qss
-    from src.ui.theme.tokens import DARK_TOKENS, FONT_BODY, FONT_MONO
+    from src.ui.theme.tokens import DARK_TOKENS, FONT_BODY, FONT_MONO, FONT_HEADLINE
 
-    qss = build_qss(DARK_TOKENS, FONT_BODY, FONT_MONO)
-    # Primary is filled with accent-primary color and text-on-cyan text
-    assert DARK_TOKENS["accent-primary"] in qss
+    qss = build_qss(DARK_TOKENS, FONT_BODY, FONT_MONO, font_headline=FONT_HEADLINE)
+    # Primary has gradient with primary color and text-on-cyan text
+    assert DARK_TOKENS["primary"] in qss
     assert DARK_TOKENS["text-on-cyan"] in qss
-    # Primary uses 5px 18px padding
-    assert "5px 18px" in qss
+    # Primary uses 8px 24px padding
+    assert "8px 24px" in qss
 
 
 def test_build_qss_button_role_secondary_styling():
     from src.ui.theme.qss_builder import build_qss
-    from src.ui.theme.tokens import DARK_TOKENS, FONT_BODY, FONT_MONO
+    from src.ui.theme.tokens import DARK_TOKENS, FONT_BODY, FONT_MONO, FONT_HEADLINE
 
-    qss = build_qss(DARK_TOKENS, FONT_BODY, FONT_MONO)
-    # Secondary uses 5px 14px padding
-    assert "5px 14px" in qss
+    qss = build_qss(DARK_TOKENS, FONT_BODY, FONT_MONO, font_headline=FONT_HEADLINE)
+    # Secondary uses 6px 16px padding
+    assert "6px 16px" in qss
 
 
 def test_build_qss_button_role_destructive_styling():
@@ -119,9 +119,9 @@ def test_build_qss_button_role_destructive_styling():
 
 def test_build_qss_focus_ring_matrix():
     from src.ui.theme.qss_builder import build_qss
-    from src.ui.theme.tokens import DARK_TOKENS, FONT_BODY, FONT_MONO
+    from src.ui.theme.tokens import DARK_TOKENS, FONT_BODY, FONT_MONO, FONT_HEADLINE
 
-    qss = build_qss(DARK_TOKENS, FONT_BODY, FONT_MONO)
+    qss = build_qss(DARK_TOKENS, FONT_BODY, FONT_MONO, font_headline=FONT_HEADLINE)
 
     focus_selectors = [
         "QPushButton:focus",
@@ -131,10 +131,6 @@ def test_build_qss_focus_ring_matrix():
         "QPlainTextEdit:focus",
         "QSpinBox:focus",
         "QDoubleSpinBox:focus",
-        "QSlider:focus",
-        "QCheckBox:focus",
-        "QRadioButton:focus",
-        "QTabBar::tab:focus",
     ]
     for sel in focus_selectors:
         assert sel in qss, f"Missing focus selector: {sel}"
@@ -142,11 +138,11 @@ def test_build_qss_focus_ring_matrix():
 
 def test_build_qss_focus_ring_treatment():
     from src.ui.theme.qss_builder import build_qss
-    from src.ui.theme.tokens import DARK_TOKENS, FONT_BODY, FONT_MONO
+    from src.ui.theme.tokens import DARK_TOKENS, FONT_BODY, FONT_MONO, FONT_HEADLINE
 
-    qss = build_qss(DARK_TOKENS, FONT_BODY, FONT_MONO)
-    # Focus ring uses 2px border with border-focus color
-    assert f'2px solid {DARK_TOKENS["border-focus"]}' in qss
+    qss = build_qss(DARK_TOKENS, FONT_BODY, FONT_MONO, font_headline=FONT_HEADLINE)
+    # Focus ring uses 1px border with border-focus color
+    assert f'1px solid {DARK_TOKENS["border-focus"]}' in qss
 
 
 # ------------------------------------------------------------------

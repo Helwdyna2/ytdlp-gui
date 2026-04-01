@@ -1,8 +1,8 @@
-"""Extract URLs page — full-width layout for the redesigned UI."""
+"""Extract URLs page — Digital Obsidian bento layout."""
 
 from typing import List, Optional, Set
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QFileDialog,
     QFormLayout,
@@ -22,7 +22,9 @@ from ...core.extract_urls_manager import ExtractUrlsManager
 from ...data.models import ExtractUrlsConfig
 from ...services.config_service import ConfigService
 from ..components.collapsible_section import CollapsibleSection
+from ..components.data_panel import DataPanel
 from ..components.page_header import PageHeader
+from ..components.split_layout import SplitLayout
 from ..playwright_install_prompt import show_playwright_install_prompt
 from ..widgets.url_input_widget import UrlInputWidget
 
@@ -67,15 +69,44 @@ class ExtractUrlsPage(QWidget):
         )
         main_layout.addWidget(header)
 
-        # 2. URL input area
-        url_label = QLabel("Page URLs")
-        url_label.setObjectName("sectionLabel")
-        main_layout.addWidget(url_label)
+        # 2. Bento split
+        split = SplitLayout(right_width=340, gap=20)
 
+        # -- Left: Source URL input + extraction results --
+        left_layout = QVBoxLayout(split.left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(12)
+
+        url_panel = DataPanel("Page URLs")
         self.url_input_widget = UrlInputWidget()
-        main_layout.addWidget(self.url_input_widget)
+        url_panel.body_layout.addWidget(self.url_input_widget)
+        left_layout.addWidget(url_panel, stretch=1)
 
-        # 3. Options (collapsible)
+        # Results area
+        results_panel = DataPanel("Results")
+        self.results_label = QLabel("No links found yet.")
+        self.results_label.setObjectName("dimLabel")
+        self.results_label.setWordWrap(True)
+        results_panel.body_layout.addWidget(self.results_label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("%v / %m URLs")
+        results_panel.body_layout.addWidget(self.progress_bar)
+
+        self.status_label = QLabel("Ready to extract.")
+        self.status_label.setWordWrap(True)
+        self.status_label.setObjectName("dimLabel")
+        results_panel.body_layout.addWidget(self.status_label)
+
+        left_layout.addWidget(results_panel)
+
+        # -- Right: Options + Output + Actions --
+        right_layout = QVBoxLayout(split.right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(12)
+
+        # Options (collapsible)
         scroll_section = CollapsibleSection("Auto-Scroll Options", expanded=False)
         options_layout = QFormLayout()
 
@@ -101,60 +132,43 @@ class ExtractUrlsPage(QWidget):
         options_layout.addRow("Bounce attempts:", self.bounce_spin)
 
         scroll_section.content_layout.addLayout(options_layout)
-        main_layout.addWidget(scroll_section)
+        right_layout.addWidget(scroll_section)
 
-        # 4. Output folder
-        output_layout = QHBoxLayout()
-        output_layout.addWidget(QLabel("Output folder:"))
+        # Output folder
+        output_panel = DataPanel("Output")
+        output_row = QHBoxLayout()
         self.output_dir_input = QLineEdit()
         self.output_dir_input.setReadOnly(True)
-        output_layout.addWidget(self.output_dir_input, 1)
+        self.output_dir_input.setPlaceholderText("Choose folder…")
+        output_row.addWidget(self.output_dir_input, 1)
         self._browse_btn = QPushButton("Browse")
-        self._browse_btn.setObjectName("btnSecondary")
+        self._browse_btn.setProperty("button_role", "secondary")
         self._browse_btn.clicked.connect(self._browse_output_dir)
-        output_layout.addWidget(self._browse_btn)
-        main_layout.addLayout(output_layout)
+        output_row.addWidget(self._browse_btn)
+        output_panel.body_layout.addLayout(output_row)
 
-        # Auth note
         auth_note = QLabel(
             "Sign in using Add URLs first to access private content."
         )
         auth_note.setWordWrap(True)
         auth_note.setObjectName("dimLabel")
-        main_layout.addWidget(auth_note)
+        output_panel.body_layout.addWidget(auth_note)
+        right_layout.addWidget(output_panel)
 
-        # 5. Status label
-        self.status_label = QLabel("Ready to extract.")
-        self.status_label.setWordWrap(True)
-        main_layout.addWidget(self.status_label)
+        right_layout.addStretch()
 
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setValue(0)
-        self.progress_bar.setFormat("%v / %m URLs")
-        main_layout.addWidget(self.progress_bar)
+        # Action buttons
+        self.extract_button = QPushButton("EXTRACT")
+        self.extract_button.setProperty("button_role", "cta")
+        self.extract_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        right_layout.addWidget(self.extract_button)
 
-        # 7. Results area
-        self.results_label = QLabel("No links found yet.")
-        self.results_label.setObjectName("resultsLabel")
-        self.results_label.setWordWrap(True)
-        main_layout.addWidget(self.results_label)
-
-        main_layout.addStretch()
-
-        # 6. Action bar
-        action_layout = QHBoxLayout()
-        action_layout.addStretch()
         self.stop_button = QPushButton("Stop")
-        self.stop_button.setObjectName("btnSecondary")
         self.stop_button.setProperty("button_role", "secondary")
         self.stop_button.setEnabled(False)
-        action_layout.addWidget(self.stop_button)
-        self.extract_button = QPushButton("Extract")
-        self.extract_button.setObjectName("btnPrimary")
-        self.extract_button.setProperty("button_role", "primary")
-        action_layout.addWidget(self.extract_button)
-        main_layout.addLayout(action_layout)
+        right_layout.addWidget(self.stop_button)
+
+        main_layout.addWidget(split, stretch=1)
 
     # ------------------------------------------------------------------
     # Signal wiring

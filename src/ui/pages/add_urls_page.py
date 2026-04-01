@@ -1,6 +1,6 @@
-"""AddUrlsPage — landing screen for adding URLs and starting downloads."""
+"""AddUrlsPage — Digital Obsidian bento layout for adding URLs and starting downloads."""
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -11,12 +11,13 @@ from PyQt6.QtWidgets import (
 )
 
 from ..components.collapsible_section import CollapsibleSection
-from ..components.config_bar import ConfigBar
+from ..components.data_panel import DataPanel
 from ..components.page_header import PageHeader
+from ..components.split_layout import SplitLayout
 
 
 class AddUrlsPage(QWidget):
-    """Landing screen for pasting URLs, configuring output, and starting downloads."""
+    """Bento-grid landing screen for pasting URLs, configuring output, and downloading."""
 
     start_download = pyqtSignal()
     cancel_download = pyqtSignal()
@@ -46,10 +47,10 @@ class AddUrlsPage(QWidget):
 
     def _setup_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(10)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(16)
 
-        # 1. Page header with right-side stats
+        # 1. Page header with stat cards
         self._header = PageHeader(
             title="Add URLs",
             description="Paste video links, sign in if needed, then download.",
@@ -59,61 +60,100 @@ class AddUrlsPage(QWidget):
         self._header.add_stat("Elapsed", "0:00")
         root.addWidget(self._header)
 
-        # 2. URL input — fills available vertical space
-        if self._url_input is not None:
-            root.addWidget(self._url_input, stretch=1)
+        # 2. Bento split: left URL panel (8/12) + right config (4/12)
+        self._split = SplitLayout(right_width=340, gap=20)
 
-        # 3. Status row: count label + Clear button
+        # -- Left panel: URL input --
+        left_layout = QVBoxLayout(self._split.left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(12)
+
+        url_panel = DataPanel("URL Input")
+        if self._url_input is not None:
+            url_panel.body_layout.addWidget(self._url_input)
+
+        # Status row inside the URL panel
         status_row = QHBoxLayout()
         self._status_label = QLabel("No links added yet")
+        self._status_label.setObjectName("dimLabel")
         status_row.addWidget(self._status_label)
         status_row.addStretch()
+        self._load_file_btn = QPushButton("Load from file…")
+        self._load_file_btn.setProperty("button_role", "secondary")
+        self._load_file_btn.clicked.connect(self.load_from_file)
+        status_row.addWidget(self._load_file_btn)
         self._clear_btn = QPushButton("Clear")
-        self._clear_btn.setObjectName("btnDestructive")
+        self._clear_btn.setProperty("button_role", "destructive")
         self._clear_btn.clicked.connect(self.clear_urls)
         status_row.addWidget(self._clear_btn)
-        root.addLayout(status_row)
+        url_panel.body_layout.addLayout(status_row)
 
-        # 4. ConfigBar: output config widget + concurrent spinbox + format label
-        self._config_bar = ConfigBar()
+        left_layout.addWidget(url_panel, stretch=1)
+
+        # -- Right panel: destination + parameters + CTA --
+        right_layout = QVBoxLayout(self._split.right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(12)
+
+        # Destination panel
         if self._output_config is not None:
-            self._config_bar.add_field("Output", self._output_config)
-            self._config_bar.add_separator()
+            dest_panel = DataPanel("Destination")
+            dest_panel.body_layout.addWidget(self._output_config)
+            right_layout.addWidget(dest_panel)
+
+        # Parameters panel
+        params_panel = DataPanel("Parameters")
+        params_layout = params_panel.body_layout
+
+        # Concurrent tasks
+        concurrent_row = QHBoxLayout()
+        concurrent_label = QLabel("CONCURRENT TASKS")
+        concurrent_label.setObjectName("configLabel")
+        concurrent_row.addWidget(concurrent_label)
+        concurrent_row.addStretch()
         self._concurrent_spinbox = QSpinBox()
         self._concurrent_spinbox.setRange(1, 10)
         self._concurrent_spinbox.setValue(3)
-        self._config_bar.add_field("Concurrent", self._concurrent_spinbox)
-        self._config_bar.add_separator()
-        self._format_label = QLabel("Best available")
-        self._config_bar.add_field("Format", self._format_label)
-        self._config_bar.add_stretch()
-        root.addWidget(self._config_bar)
+        self._concurrent_spinbox.setFixedWidth(60)
+        concurrent_row.addWidget(self._concurrent_spinbox)
+        params_layout.addLayout(concurrent_row)
 
-        # 5. Auth status widget (collapsible)
+        # Format
+        format_row = QHBoxLayout()
+        format_label = QLabel("FORMAT")
+        format_label.setObjectName("configLabel")
+        format_row.addWidget(format_label)
+        format_row.addStretch()
+        self._format_label = QLabel("Best available")
+        format_row.addWidget(self._format_label)
+        params_layout.addLayout(format_row)
+
+        right_layout.addWidget(params_panel)
+
+        # Auth status (collapsible)
         if self._auth_status is not None:
             auth_section = CollapsibleSection("Authentication", expanded=False)
             auth_section.content_layout.addWidget(self._auth_status)
-            root.addWidget(auth_section)
+            right_layout.addWidget(auth_section)
 
-        # 6. Action bar
-        action_row = QHBoxLayout()
-        self._load_file_btn = QPushButton("Load from file...")
-        self._load_file_btn.clicked.connect(self.load_from_file)
-        action_row.addWidget(self._load_file_btn)
-        action_row.addStretch()
+        right_layout.addStretch()
+
+        # CTA button
+        self._start_btn = QPushButton("INGEST BATCH")
+        self._start_btn.setProperty("button_role", "cta")
+        self._start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._start_btn.clicked.connect(self.start_download)
+        right_layout.addWidget(self._start_btn)
+
         self._cancel_btn = QPushButton("Cancel")
-        self._cancel_btn.setObjectName("btnSecondary")
         self._cancel_btn.setProperty("button_role", "secondary")
         self._cancel_btn.clicked.connect(self.cancel_download)
-        action_row.addWidget(self._cancel_btn)
-        self._start_btn = QPushButton("Start Download")
-        self._start_btn.setObjectName("btnPrimary")
-        self._start_btn.setProperty("button_role", "primary")
-        self._start_btn.clicked.connect(self.start_download)
-        action_row.addWidget(self._start_btn)
-        root.addLayout(action_row)
+        self._cancel_btn.setEnabled(False)
+        right_layout.addWidget(self._cancel_btn)
 
-        # 7. Progress section (hidden initially)
+        root.addWidget(self._split, stretch=1)
+
+        # 3. Progress section (hidden initially, shown below split during downloads)
         self._progress_section = QWidget()
         progress_layout = QVBoxLayout(self._progress_section)
         progress_layout.setContentsMargins(0, 0, 0, 0)
