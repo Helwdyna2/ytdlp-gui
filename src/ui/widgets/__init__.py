@@ -3,6 +3,7 @@
 from .auth_status_widget import AuthStatusWidget
 from .download_log_widget import DownloadLogWidget
 from .file_picker_widget import FilePickerWidget
+from .folder_preview_widget import FolderPreviewWidget
 from .match_detail_dialog import MatchDetailDialog
 from .match_skip_keywords_dialog import MatchSkipKeywordsDialog
 from .output_config_widget import OutputConfigWidget
@@ -16,6 +17,7 @@ __all__ = [
     "AuthStatusWidget",
     "DownloadLogWidget",
     "FilePickerWidget",
+    "FolderPreviewWidget",
     "MatchDetailDialog",
     "MatchSkipKeywordsDialog",
     "OutputConfigWidget",

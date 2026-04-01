@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal, QMutexLocker, QRecursiveMutex
 
+from ..core.conversion_paths import build_conversion_output_path
 from ..core.ffmpeg_worker import FFmpegWorker
 from ..core.job_creation_worker import JobCreationWorker
 from ..data.models import ConversionConfig, ConversionJob, ConversionStatus
@@ -96,7 +97,10 @@ class ConversionManager(QObject):
         self._config = config
 
     def add_files(
-        self, input_paths: List[str], output_dir: Optional[str] = None
+        self,
+        input_paths: List[str],
+        output_dir: Optional[str] = None,
+        output_paths: Optional[Dict[str, str]] = None,
     ) -> List[ConversionJob]:
         """
         Add files to the conversion queue.
@@ -117,7 +121,11 @@ class ConversionManager(QObject):
 
         jobs = []
         for input_path in input_paths:
-            job = self._create_job(input_path, output_directory)
+            job = self._create_job(
+                input_path,
+                output_directory,
+                output_path=output_paths.get(input_path) if output_paths else None,
+            )
             jobs.append(job)
 
             with QMutexLocker(self._mutex):
@@ -127,7 +135,10 @@ class ConversionManager(QObject):
         return jobs
 
     def add_files_async(
-        self, input_paths: List[str], output_dir: Optional[str] = None
+        self,
+        input_paths: List[str],
+        output_dir: Optional[str] = None,
+        output_paths: Optional[Dict[str, str]] = None,
     ) -> None:
         """
         Add files to the conversion queue asynchronously (non-blocking).
@@ -151,6 +162,7 @@ class ConversionManager(QObject):
         self._job_creation_worker = JobCreationWorker(
             input_paths=input_paths,
             output_dir=output_directory,
+            output_paths=output_paths,
             config=self._config,
             repository=self._repository,
             parent=self,
@@ -202,7 +214,12 @@ class ConversionManager(QObject):
         """Forward files_deleted signal from job creation worker."""
         self.files_deleted.emit(count, paths)
 
-    def _create_job(self, input_path: str, output_dir: str) -> ConversionJob:
+    def _create_job(
+        self,
+        input_path: str,
+        output_dir: str,
+        output_path: Optional[str] = None,
+    ) -> ConversionJob:
         """
         Create a conversion job.
 
@@ -217,15 +234,16 @@ class ConversionManager(QObject):
 
         # Generate output filename
         input_file = Path(input_path)
-        output_name = f"{input_file.stem}_converted.mp4"
-        output_path = str(Path(output_dir) / output_name)
+        resolved_output_path = output_path or build_conversion_output_path(
+            input_path, output_dir=output_dir
+        )
 
         # Get input file size
         input_size = input_file.stat().st_size if input_file.exists() else 0
 
         job = ConversionJob(
             input_path=input_path,
-            output_path=output_path,
+            output_path=resolved_output_path,
             status=ConversionStatus.PENDING,
             output_codec=config.output_codec,
             crf_value=config.crf_value,

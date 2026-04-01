@@ -13,8 +13,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QLineEdit,
     QFileDialog,
-    QTreeWidget,
-    QTreeWidgetItem,
     QListWidget,
     QListWidgetItem,
     QCheckBox,
@@ -32,6 +30,7 @@ from ...services.config_service import ConfigService
 from ...utils.dialog_utils import get_dialog_start_dir, update_dialog_last_dir
 from ..components.page_header import PageHeader
 from ..components.split_layout import SplitLayout
+from ..widgets.folder_preview_widget import FolderPreviewWidget
 
 logger = logging.getLogger(__name__)
 
@@ -153,48 +152,6 @@ class SortCriteriaWidget(QListWidget):
         item.setSizeHint(widget.sizeHint())
         self.addItem(item)
         self.setItemWidget(item, widget)
-
-
-class FolderPreviewWidget(QTreeWidget):
-    """Tree widget showing a preview of the proposed folder structure."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setHeaderLabels(["Proposed Structure"])
-        self.setRootIsDecorated(True)
-
-    def update_preview(self, preview: Dict[str, List[str]]) -> None:
-        """Populate the tree from a folder-path -> file-list mapping."""
-        self.clear()
-        if not preview:
-            return
-
-        root_items: Dict[str, QTreeWidgetItem] = {}
-
-        for folder_path, files in sorted(preview.items()):
-            parts = folder_path.strip("/").split("/") if folder_path else []
-
-            current_parent = None
-            current_path = ""
-
-            for part in parts:
-                current_path = f"{current_path}/{part}" if current_path else part
-                if current_path not in root_items:
-                    node = QTreeWidgetItem([f"📁 {part}"])
-                    if current_parent:
-                        current_parent.addChild(node)
-                    else:
-                        self.addTopLevelItem(node)
-                    root_items[current_path] = node
-                current_parent = root_items[current_path]
-
-            parent_item = current_parent if current_parent else self.invisibleRootItem()
-            for filename in sorted(files):
-                file_item = QTreeWidgetItem([f"📄 {filename}"])
-                if parent_item is not None:
-                    parent_item.addChild(file_item)
-
-        self.expandAll()
 
 
 # ---------------------------------------------------------------------------

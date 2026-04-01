@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -23,6 +23,11 @@ from PyQt6.QtWidgets import (
 )
 
 from ...core.conversion_manager import ConversionManager
+from ...core.conversion_paths import (
+    build_conversion_output_name,
+    build_conversion_output_path,
+    get_conversion_preview_folder,
+)
 from ...core.ffprobe_worker import FFprobeWorker
 from ...core.folder_scan_worker import FolderScanWorker
 from ...data.models import ConversionConfig, ConversionJob
@@ -43,6 +48,8 @@ from ...utils.hardware_accel import (
 )
 from ..components.page_header import PageHeader
 from ..components.split_layout import SplitLayout
+from ..components.data_panel import DataPanel
+from ..widgets.folder_preview_widget import FolderPreviewWidget
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +69,8 @@ SOURCE_CODEC_DISPLAY_NAMES = {
 }
 
 TARGET_CODECS_WITH_SOURCE_FILTER = {"h264", "hevc"}
+FILE_PATH_ROLE = int(Qt.ItemDataRole.UserRole)
+SOURCE_ROOT_ROLE = FILE_PATH_ROLE + 1
 
 
 class FileListWidget(QWidget):
@@ -72,6 +81,7 @@ class FileListWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._scan_worker: Optional[FolderScanWorker] = None
+        self._scan_root: Optional[str] = None
         self._setup_ui()
         self._connect_signals()
 
@@ -133,6 +143,7 @@ class FileListWidget(QWidget):
         )
         if folder:
             update_dialog_last_dir(folder)
+            self._scan_root = folder
             # Disable buttons during scan
             self._add_files_btn.setEnabled(False)
             self._add_folder_btn.setEnabled(False)
@@ -151,7 +162,7 @@ class FileListWidget(QWidget):
 
     def _on_scan_completed(self, video_files: List[str]) -> None:
         """Handle folder scan completion."""
-        self._add_paths(video_files)
+        self._add_paths(video_files, source_root=self._scan_root)
 
         # Re-enable buttons
         self._add_files_btn.setEnabled(True)
@@ -162,6 +173,7 @@ class FileListWidget(QWidget):
         if self._scan_worker:
             self._scan_worker.deleteLater()
             self._scan_worker = None
+        self._scan_root = None
 
     def _on_scan_error(self, error_message: str) -> None:
         """Handle folder scan error."""
@@ -178,17 +190,31 @@ class FileListWidget(QWidget):
         if self._scan_worker:
             self._scan_worker.deleteLater()
             self._scan_worker = None
+        self._scan_root = None
 
-    def _add_paths(self, paths: List[str]) -> None:
+    def _add_paths(
+        self, paths: List[str], source_root: Optional[str] = None
+    ) -> None:
         """Add file paths to the list, skipping duplicates."""
         existing = set(self.get_file_paths())
         for path in paths:
             if path not in existing:
-                item = QListWidgetItem(Path(path).name)
-                item.setData(Qt.ItemDataRole.UserRole, path)
+                item = QListWidgetItem(self._display_name_for_path(path, source_root))
+                item.setData(FILE_PATH_ROLE, path)
+                item.setData(SOURCE_ROOT_ROLE, source_root)
                 item.setToolTip(path)
                 self._list_widget.addItem(item)
         self.files_changed.emit()
+
+    def _display_name_for_path(self, path: str, source_root: Optional[str]) -> str:
+        """Return the label shown in the file list."""
+        file_path = Path(path)
+        if source_root:
+            try:
+                return file_path.relative_to(Path(source_root)).as_posix()
+            except ValueError:
+                pass
+        return file_path.name
 
     def _on_remove(self) -> None:
         """Remove selected files."""
@@ -207,14 +233,25 @@ class FileListWidget(QWidget):
         for i in range(self._list_widget.count()):
             item = self._list_widget.item(i)
             if item is not None:
-                paths.append(item.data(Qt.ItemDataRole.UserRole))
+                paths.append(item.data(FILE_PATH_ROLE))
         return paths
+
+    def get_entries(self) -> List[Tuple[str, Optional[str]]]:
+        """Get all file entries with their optional source roots."""
+        entries: List[Tuple[str, Optional[str]]] = []
+        for i in range(self._list_widget.count()):
+            item = self._list_widget.item(i)
+            if item is not None:
+                entries.append(
+                    (item.data(FILE_PATH_ROLE), item.data(SOURCE_ROOT_ROLE))
+                )
+        return entries
 
     def get_selected_file_path(self) -> Optional[str]:
         """Get the first selected file path, or None if no selection."""
         items = self._list_widget.selectedItems()
         if items:
-            return items[0].data(Qt.ItemDataRole.UserRole)
+            return items[0].data(FILE_PATH_ROLE)
         return None
 
     def count(self) -> int:
@@ -286,25 +323,47 @@ class ConvertPage(QWidget):
         # --- LEFT panel: file list ---
         left_layout = QVBoxLayout(split.left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
+        left_layout.setSpacing(12)
 
+        files_panel = DataPanel("Source Files")
+        files_panel.body_layout.setSpacing(10)
         self._file_list = FileListWidget()
-        left_layout.addWidget(self._file_list)
+        files_panel.body_layout.addWidget(self._file_list)
 
-        # Jobs area
         self._jobs_list = QListWidget()
-        self._jobs_list.setMaximumHeight(160)
-        left_layout.addWidget(self._jobs_list)
+        self._jobs_list.setMaximumHeight(120)
+        self._jobs_list.setVisible(False)
+        files_panel.body_layout.addWidget(self._jobs_list)
 
         self._overall_progress = QProgressBar()
-        left_layout.addWidget(self._overall_progress)
+        self._overall_progress.setVisible(False)
+        files_panel.body_layout.addWidget(self._overall_progress)
+
+        left_layout.addWidget(files_panel, stretch=3)
+
+        preview_panel = DataPanel("Preview")
+        preview_panel.body_layout.setSpacing(10)
+        self._preview_tree = FolderPreviewWidget()
+        preview_panel.body_layout.addWidget(self._preview_tree, stretch=1)
+
+        expand_row = QHBoxLayout()
+        self._expand_all_btn = QPushButton("Expand All")
+        self._expand_all_btn.setObjectName("btnWire")
+        self._expand_all_btn.setProperty("button_role", "secondary")
+        self._collapse_all_btn = QPushButton("Collapse All")
+        self._collapse_all_btn.setObjectName("btnWire")
+        self._collapse_all_btn.setProperty("button_role", "secondary")
+        expand_row.addWidget(self._expand_all_btn)
+        expand_row.addWidget(self._collapse_all_btn)
+        expand_row.addStretch()
+        preview_panel.body_layout.addLayout(expand_row)
+
+        left_layout.addWidget(preview_panel, stretch=2)
 
         # --- RIGHT panel: settings card ---
         right_layout = QVBoxLayout(split.right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(12)
-
-        from ..components.data_panel import DataPanel
 
         settings_panel = DataPanel("Output Settings")
         sl = settings_panel.body_layout
@@ -359,6 +418,7 @@ class ConvertPage(QWidget):
         self._output_input = QLineEdit()
         self._output_input.setPlaceholderText("Same as input (adds _converted suffix)")
         self._output_browse_btn = QPushButton("Browse")
+        self._output_browse_btn.setObjectName("btnWire")
         self._output_browse_btn.setProperty("button_role", "secondary")
         output_row.addWidget(self._output_input)
         output_row.addWidget(self._output_browse_btn)
@@ -394,7 +454,10 @@ class ConvertPage(QWidget):
         )
         self._source_codec_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._output_input.textChanged.connect(self._on_settings_changed)
+        self._output_input.textChanged.connect(self._update_preview)
         self._output_browse_btn.clicked.connect(self._on_browse_output)
+        self._expand_all_btn.clicked.connect(self._preview_tree.expandAll)
+        self._collapse_all_btn.clicked.connect(self._preview_tree.collapseAll)
 
     # ------------------------------------------------------------------
     # Settings persistence
@@ -510,6 +573,7 @@ class ConvertPage(QWidget):
         """Enable/disable start button based on file count."""
         self._start_btn.setEnabled(self._file_list.count() > 0)
         self._refresh_source_codec_scan()
+        self._update_preview()
 
     def _on_start(self) -> None:
         """Start conversion."""
@@ -556,6 +620,9 @@ class ConvertPage(QWidget):
                 )
 
         config = self._build_config()
+        output_paths = self._build_output_paths(
+            files_to_convert, config.output_dir
+        )
 
         # Create manager
         self._conversion_manager = ConversionManager()
@@ -581,11 +648,17 @@ class ConvertPage(QWidget):
         # Show preparing status
         self._overall_progress.setMaximum(len(files_to_convert))
         self._overall_progress.setValue(0)
+        self._overall_progress.setVisible(True)
+        self._jobs_list.setVisible(False)
 
         self.start_requested.emit()
 
         # Start async job creation (non-blocking)
-        self._conversion_manager.add_files_async(files_to_convert, config.output_dir)
+        self._conversion_manager.add_files_async(
+            files_to_convert,
+            config.output_dir,
+            output_paths=output_paths,
+        )
 
     def _on_cancel(self) -> None:
         """Cancel all conversions."""
@@ -611,6 +684,7 @@ class ConvertPage(QWidget):
         self._done_count = 0
         self._failed_count = 0
         self._jobs_list.clear()
+        self._jobs_list.setVisible(bool(jobs))
         self._overall_progress.setMaximum(len(jobs))
         self._overall_progress.setValue(0)
 
@@ -665,6 +739,7 @@ class ConvertPage(QWidget):
         self._file_list.set_enabled(True)
         self._start_btn.setEnabled(self._file_list.count() > 0)
         self._cancel_btn.setVisible(False)
+        self._overall_progress.setVisible(False)
 
         if self._conversion_manager:
             completed = self._conversion_manager.completed_count
@@ -689,6 +764,8 @@ class ConvertPage(QWidget):
 
         self._done_count = 0
         self._failed_count = 0
+        if self._jobs_list.count() == 0:
+            self._jobs_list.setVisible(False)
 
     def _on_files_deleted(self, count: int, paths: List[str]) -> None:
         """Notify user when zero-byte files are moved to trash."""
@@ -915,6 +992,41 @@ class ConvertPage(QWidget):
             hardware_encoder=hw_encoder,
             output_dir=self._output_input.text() or None,
         )
+
+    def _build_output_paths(
+        self, input_paths: List[str], output_dir: Optional[str]
+    ) -> Dict[str, str]:
+        """Build output paths for the selected inputs."""
+        source_roots = dict(self._file_list.get_entries())
+        return {
+            input_path: build_conversion_output_path(
+                input_path,
+                output_dir=output_dir,
+                source_root=source_roots.get(input_path),
+            )
+            for input_path in input_paths
+        }
+
+    def _update_preview(self) -> None:
+        """Refresh the Convert preview tree."""
+        entries = self._file_list.get_entries()
+        if not entries:
+            self._preview_tree.clear()
+            return
+
+        output_dir = self._output_input.text().strip() or None
+        preview: Dict[str, List[str]] = {}
+        for input_path, source_root in entries:
+            folder = get_conversion_preview_folder(
+                input_path,
+                output_dir=output_dir,
+                source_root=source_root,
+            )
+            preview.setdefault(folder, []).append(
+                build_conversion_output_name(input_path)
+            )
+
+        self._preview_tree.update_preview(preview)
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable the page."""

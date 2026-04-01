@@ -74,6 +74,8 @@ class FFmpegWorker(QThread):
             return
 
         try:
+            Path(self._output_path).parent.mkdir(parents=True, exist_ok=True)
+
             # Build the FFmpeg command
             cmd = self._build_command(ffmpeg_path)
             self.log.emit("info", f"Starting conversion: {Path(self._input_path).name}")

@@ -3,10 +3,11 @@
 import logging
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from ..core.conversion_paths import build_conversion_output_path
 from ..data.models import ConversionConfig, ConversionJob, ConversionStatus
 from ..data.repositories.conversion_repository import ConversionRepository
 from ..utils.file_validation import cleanup_zero_byte_files
@@ -37,6 +38,7 @@ class JobCreationWorker(QThread):
         self,
         input_paths: List[str],
         output_dir: str,
+        output_paths: Optional[Dict[str, str]],
         config: ConversionConfig,
         repository: ConversionRepository,
         parent=None,
@@ -54,6 +56,7 @@ class JobCreationWorker(QThread):
         super().__init__(parent)
         self._input_paths = input_paths
         self._output_dir = output_dir
+        self._output_paths = output_paths or {}
         self._config = config
         self._repository = repository
         self._cancelled = False
@@ -123,8 +126,9 @@ class JobCreationWorker(QThread):
         """
         # Generate output filename
         input_file = Path(input_path)
-        output_name = f"{input_file.stem}_converted.mp4"
-        output_path = str(Path(self._output_dir) / output_name)
+        output_path = self._output_paths.get(input_path) or build_conversion_output_path(
+            input_path, output_dir=self._output_dir
+        )
 
         # Get input file size (blocking I/O - that's why we're in a thread)
         input_size = 0

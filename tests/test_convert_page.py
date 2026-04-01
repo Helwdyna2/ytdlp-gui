@@ -133,14 +133,16 @@ def fake_conversion_manager(monkeypatch, convert_page_module):
             self.config = None
             self.added_files = None
             self.added_output_dir = None
+            self.added_output_paths = None
             type(self).instances.append(self)
 
         def set_config(self, config):
             self.config = config
 
-        def add_files_async(self, files, output_dir):
+        def add_files_async(self, files, output_dir, output_paths=None):
             self.added_files = list(files)
             self.added_output_dir = output_dir
+            self.added_output_paths = output_paths
 
     monkeypatch.setattr(convert_page_module, "ConversionManager", FakeConversionManager)
     FakeConversionManager.instances = []
@@ -480,3 +482,72 @@ def test_convert_page_build_config_respects_hw_selection(
     assert config.output_codec == "h264"
     assert config.use_hardware_accel is True
     assert config.hardware_encoder == "videotoolbox"
+
+
+def test_convert_page_shows_preview_tree_for_nested_folder_inputs(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    page = ConvertPage()
+    page._file_list._add_paths(
+        [
+            "/tmp/library/Action/movie1.mp4",
+            "/tmp/library/Drama/movie2.mp4",
+            "/tmp/library/Drama/Sub/movie3.mp4",
+        ],
+        source_root="/tmp/library",
+    )
+
+    top_labels = [
+        page._preview_tree.topLevelItem(i).text(0)
+        for i in range(page._preview_tree.topLevelItemCount())
+    ]
+
+    assert "📁 Action" in top_labels
+    assert "📁 Drama" in top_labels
+
+
+def test_convert_page_folder_entries_keep_relative_labels(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    page = ConvertPage()
+    page._file_list._add_paths(
+        ["/tmp/library/Drama/Sub/movie3.mp4"], source_root="/tmp/library"
+    )
+
+    assert page._file_list._list_widget.item(0).text() == "Drama/Sub/movie3.mp4"
+
+
+def test_convert_page_passes_nested_output_paths_for_folder_sources(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_conversion_manager,
+    convert_page_module,
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+
+    page = ConvertPage()
+    page._file_list._add_paths(
+        [
+            "/tmp/library/Action/movie1.mp4",
+            "/tmp/library/Drama/Sub/movie2.mp4",
+        ],
+        source_root="/tmp/library",
+    )
+    page._output_input.setText("/tmp/output")
+    qapp.processEvents()
+
+    page._on_start()
+
+    manager = fake_conversion_manager.instances[-1]
+    assert manager.added_output_paths == {
+        "/tmp/library/Action/movie1.mp4": "/tmp/output/Action/movie1_converted.mp4",
+        "/tmp/library/Drama/Sub/movie2.mp4": "/tmp/output/Drama/Sub/movie2_converted.mp4",
+    }
