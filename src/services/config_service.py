@@ -76,10 +76,18 @@ DEFAULT_CONFIG = {
         "mode": "single",  # "single" or "batch"
         "single_lossless": True,
         "single_output_dir": "",
+        "single_export_mode": "separate",
         "batch_lossless": True,
         "batch_output_dir": "",
         "global_start_offset": 0.0,
         "global_end_offset": 0.0,
+        "quick_session_restore": True,
+        "playback": {
+            "resume_after_scrub": False,
+            "mute_during_scrub": True,
+            "scrub_send_interval_ms": 24,
+            "scrub_exact_settle_delay_ms": 120,
+        },
     },
     "rename": {
         "last_folder": "",
