@@ -80,6 +80,9 @@ class VideoPreviewWidget(QWidget):
         self._duration = 0.0
         self._position = 0.0
         self._requested_display_position: Optional[float] = None
+        self._decoder_mode = "unknown"
+        self._decoder_name = ""
+        self._decoder_description = ""
         self._is_playing = False
         self._video_path: Optional[str] = None
         self._pending_video_path: Optional[str] = None
@@ -104,6 +107,12 @@ class VideoPreviewWidget(QWidget):
         self._availability_label.setWordWrap(True)
         self._availability_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self._availability_label)
+
+        self._decoder_status_label = QLabel("Decoder: waiting for media")
+        self._decoder_status_label.setObjectName("dimLabel")
+        self._decoder_status_label.setWordWrap(True)
+        self._decoder_status_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self._decoder_status_label)
 
         controls_layout = QHBoxLayout()
         controls_layout.setSpacing(8)
@@ -155,6 +164,7 @@ class VideoPreviewWidget(QWidget):
         self._playback.file_loaded.connect(self._on_file_loaded)
         self._playback.error_occurred.connect(self._on_playback_error)
         self._playback.availability_changed.connect(self._sync_availability_message)
+        self._playback.decoder_status_changed.connect(self._on_decoder_status_changed)
         self._render_surface.render_ready.connect(self._on_render_surface_ready)
         self._scrub_controller.preview_position_changed.connect(
             self._on_scrub_preview_position_changed
@@ -218,11 +228,13 @@ class VideoPreviewWidget(QWidget):
     def _on_playback_error(self, message: str) -> None:
         logger.error("Video preview error: %s", message)
         self._availability_label.setText(f"Preview error: {message}")
+        self._decoder_status_label.setText("Decoder: unavailable")
 
     def _sync_availability_message(self, available: bool) -> None:
         if available:
             self._availability_label.setText("Load a video to preview and scrub.")
             self._render_surface.show()
+            self._update_decoder_status_label()
             return
 
         if not self._playback.has_attempted_initialization():
@@ -230,6 +242,7 @@ class VideoPreviewWidget(QWidget):
                 "Load a video to initialize preview playback and scrub controls."
             )
             self._render_surface.hide()
+            self._decoder_status_label.setText("Decoder: waiting for media")
             return
 
         self._availability_label.setText(
@@ -237,6 +250,7 @@ class VideoPreviewWidget(QWidget):
             "You can still load files, split segments, and export enabled ranges."
         )
         self._render_surface.hide()
+        self._decoder_status_label.setText("Decoder: unavailable")
 
     def _update_play_button(self) -> None:
         self._play_btn.setText("Pause" if self._is_playing else "Play")
@@ -245,6 +259,21 @@ class VideoPreviewWidget(QWidget):
         self._time_label.setText(
             f"{self._format_time(self._display_position())} / {self._format_time(self._duration)}"
         )
+
+    def _update_decoder_status_label(self) -> None:
+        if not self._playback.is_available():
+            self._decoder_status_label.setText("Decoder: unavailable")
+            return
+
+        decoder_display = self._decoder_description or self._decoder_name or "unknown"
+        if self._decoder_mode in {"", "unknown"}:
+            status = "waiting for media"
+        elif self._decoder_mode == "no":
+            status = f"software ({decoder_display})"
+        else:
+            status = f"hardware ({self._decoder_mode}, {decoder_display})"
+
+        self._decoder_status_label.setText(f"Decoder: {status}")
 
     def _display_position(self) -> float:
         if self._requested_display_position is not None:
@@ -274,6 +303,9 @@ class VideoPreviewWidget(QWidget):
         self._pending_video_path = None
         self._position = 0.0
         self._requested_display_position = None
+        self._decoder_mode = "unknown"
+        self._decoder_name = ""
+        self._decoder_description = ""
         self._duration = 0.0
         self._position_slider.blockSignals(True)
         self._position_slider.setValue(0)
@@ -300,6 +332,9 @@ class VideoPreviewWidget(QWidget):
         self._duration = 0.0
         self._position = 0.0
         self._requested_display_position = None
+        self._decoder_mode = "unknown"
+        self._decoder_name = ""
+        self._decoder_description = ""
         self._is_playing = False
         self._set_controls_enabled(False)
         self._position_slider.blockSignals(True)
@@ -308,6 +343,7 @@ class VideoPreviewWidget(QWidget):
         self._update_play_button()
         self._sync_availability_message(self._playback.is_available())
         self._update_time_label()
+        self._update_decoder_status_label()
 
     def play(self) -> None:
         self._playback.play()
@@ -348,6 +384,14 @@ class VideoPreviewWidget(QWidget):
             return
         self._requested_display_position = None
         self._update_time_label()
+
+    def _on_decoder_status_changed(
+        self, hwdec_current: str, decoder_name: str, decoder_description: str
+    ) -> None:
+        self._decoder_mode = hwdec_current or "unknown"
+        self._decoder_name = decoder_name or ""
+        self._decoder_description = decoder_description or ""
+        self._update_decoder_status_label()
 
     def cleanup(self) -> None:
         self._playback.cleanup()

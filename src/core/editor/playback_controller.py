@@ -21,6 +21,7 @@ from .mpv_binding import (
     MPV_EVENT_SEEK,
     MPV_FORMAT_DOUBLE,
     MPV_FORMAT_FLAG,
+    MPV_FORMAT_STRING,
     MpvBindingError,
     MpvClient,
     MpvEventProperty,
@@ -44,6 +45,7 @@ class PlaybackController(QObject):
     error_occurred = pyqtSignal(str)
     availability_changed = pyqtSignal(bool)
     seek_settled = pyqtSignal(int, float)
+    decoder_status_changed = pyqtSignal(str, str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -57,6 +59,9 @@ class PlaybackController(QObject):
         self._last_loaded_path: Optional[str] = None
         self._seek_serial = 0
         self._pending_seek_serial: Optional[int] = None
+        self._hwdec_current = "unknown"
+        self._video_decoder = ""
+        self._video_decoder_desc = ""
 
         self._wakeup_callback: Optional[WakeupCallback] = None
         self._render_update_callback: Optional[RenderUpdateCallback] = None
@@ -86,13 +91,20 @@ class PlaybackController(QObject):
             self._client.set_option_string("osc", "no")
             self._client.set_option_string("input-default-bindings", "no")
             self._client.set_option_string("input-vo-keyboard", "no")
-            self._client.set_option_string("hwdec", "auto-safe")
+            self._client.set_option_string("hwdec", "auto")
             self._client.set_option_string("keep-open", "yes")
             self._client.initialize()
 
             self._client.observe_property(1, "time-pos", MPV_FORMAT_DOUBLE)
             self._client.observe_property(2, "duration", MPV_FORMAT_DOUBLE)
             self._client.observe_property(3, "pause", MPV_FORMAT_FLAG)
+            self._client.observe_property(4, "hwdec-current", MPV_FORMAT_STRING)
+            self._client.observe_property(
+                5, "current-tracks/video/decoder", MPV_FORMAT_STRING
+            )
+            self._client.observe_property(
+                6, "current-tracks/video/decoder-desc", MPV_FORMAT_STRING
+            )
 
             self._wakeup_callback = WakeupCallback(self._on_wakeup)
             self._client.set_wakeup_callback(self._wakeup_callback)
@@ -165,6 +177,7 @@ class PlaybackController(QObject):
         try:
             self._position = 0.0
             self._pending_seek_serial = None
+            self._reset_decoder_status()
             self.position_changed.emit(0.0)
             self._client.command(["loadfile", path, "replace"])
             self.pause()
@@ -209,6 +222,7 @@ class PlaybackController(QObject):
             self._duration = 0.0
             self._is_playing = False
             self._pending_seek_serial = None
+            self._reset_decoder_status()
             self.position_changed.emit(0.0)
             self.duration_changed.emit(0.0)
             self.playback_state_changed.emit(False)
@@ -325,6 +339,7 @@ class PlaybackController(QObject):
             self._position = 0.0
             self._is_playing = False
             self._pending_seek_serial = None
+            self._reset_decoder_status()
             self.position_changed.emit(0.0)
             self.playback_state_changed.emit(False)
         elif event.event_id == MPV_EVENT_SEEK:
@@ -349,6 +364,18 @@ class PlaybackController(QObject):
             if name == "pause":
                 self._is_playing = not value
                 self.playback_state_changed.emit(self._is_playing)
+        elif prop.format == MPV_FORMAT_STRING:
+            raw_value = ctypes.cast(prop.data, ctypes.c_char_p).value if prop.data else None
+            value = raw_value.decode("utf-8", "replace") if raw_value else ""
+            if name == "hwdec-current":
+                self._hwdec_current = value or "unknown"
+                self._emit_decoder_status()
+            elif name == "current-tracks/video/decoder":
+                self._video_decoder = value
+                self._emit_decoder_status()
+            elif name == "current-tracks/video/decoder-desc":
+                self._video_decoder_desc = value
+                self._emit_decoder_status()
 
     def _emit_seek_settled(self) -> None:
         if self._pending_seek_serial is None:
@@ -356,3 +383,16 @@ class PlaybackController(QObject):
         serial = self._pending_seek_serial
         self._pending_seek_serial = None
         self.seek_settled.emit(serial, self._position)
+
+    def _reset_decoder_status(self) -> None:
+        self._hwdec_current = "unknown"
+        self._video_decoder = ""
+        self._video_decoder_desc = ""
+        self._emit_decoder_status()
+
+    def _emit_decoder_status(self) -> None:
+        self.decoder_status_changed.emit(
+            self._hwdec_current,
+            self._video_decoder,
+            self._video_decoder_desc,
+        )
