@@ -329,7 +329,11 @@ def main():
 
         # Create main window
         logger.info("Creating main window...")
-        main_window = MainWindow(database, session_service, saved_task_service)
+        main_window = MainWindow(
+            database,
+            session_service,
+            saved_task_service=saved_task_service,
+        )
 
         # Start auto-save
         session_service.start_auto_save()

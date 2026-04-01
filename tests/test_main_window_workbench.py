@@ -69,6 +69,43 @@ def _make_window(qapp, monkeypatch):
     )
 
 
+def _make_window_with_positional_parent(qapp, monkeypatch):
+    """Create a MainWindow using the legacy positional parent argument."""
+    from PyQt6.QtWidgets import QWidget
+    from src.ui import main_window as main_window_module
+    from src.ui.main_window import MainWindow
+
+    class DummyConfigService:
+        def __init__(self):
+            self.values = {}
+
+        def get(self, key, default=None):
+            return self.values.get(key, default)
+
+    class DummyDownloadManager:
+        def __init__(self, download_repo):
+            self.download_repo = download_repo
+            self.is_running = False
+
+    class DummyAuthManager:
+        def __init__(self, parent=None):
+            self.parent = parent
+
+    monkeypatch.setattr(main_window_module, "ConfigService", DummyConfigService)
+    monkeypatch.setattr(main_window_module, "DownloadManager", DummyDownloadManager)
+    monkeypatch.setattr(main_window_module, "AuthManager", DummyAuthManager)
+    monkeypatch.setattr(main_window_module.MainWindow, "_setup_ui", lambda self: None)
+    monkeypatch.setattr(main_window_module.MainWindow, "_setup_menu_bar", lambda self: None)
+    monkeypatch.setattr(main_window_module.MainWindow, "_setup_shortcuts", lambda self: None)
+    monkeypatch.setattr(main_window_module.MainWindow, "_connect_signals", lambda self: None)
+    monkeypatch.setattr(main_window_module.MainWindow, "_setup_quick_look_shortcut", lambda self: None)
+
+    db = MagicMock()
+    session_svc = MagicMock()
+    parent = QWidget()
+    return MainWindow(db, session_svc, parent), parent
+
+
 def test_main_window_integration(qapp, monkeypatch):
     """Single consolidated test to minimize teardown crashes."""
     win = _make_window(qapp, monkeypatch)
@@ -84,6 +121,17 @@ def test_main_window_integration(qapp, monkeypatch):
     qapp.processEvents()
     del win
     gc.collect()
+    qapp.processEvents()
+
+
+def test_main_window_accepts_legacy_positional_parent(qapp, monkeypatch):
+    win, parent = _make_window_with_positional_parent(qapp, monkeypatch)
+
+    assert win.parent() is parent
+    assert win.saved_task_service is None
+
+    win.trim_page = type("DummyTrimPage", (), {"cleanup": lambda self: None})()
+    win.close()
     qapp.processEvents()
 
 

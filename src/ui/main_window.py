@@ -141,8 +141,9 @@ class MainWindow(QMainWindow):
         self,
         database: Database,
         session_service: SessionService,
-        saved_task_service: Optional[SavedTaskService] = None,
         parent=None,
+        *,
+        saved_task_service: Optional[SavedTaskService] = None,
     ):
         super().__init__(parent)
         self.database = database
