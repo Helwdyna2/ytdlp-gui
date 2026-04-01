@@ -790,5 +790,6 @@ class MainWindow(QMainWindow):
 
         # Stop auto-save and save any pending changes via SessionService
         self.session_service.stop_auto_save()
+        self.trim_page.cleanup()
 
         event.accept()
