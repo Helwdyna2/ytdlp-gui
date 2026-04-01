@@ -160,18 +160,24 @@ class Database:
         self.execute("""
             CREATE TABLE IF NOT EXISTS saved_tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                status TEXT NOT NULL DEFAULT 'pending',
-                payload TEXT NOT NULL DEFAULT '{}',
-                summary TEXT NOT NULL DEFAULT '{}',
+                task_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                summary_json TEXT NOT NULL DEFAULT '{}',
+                payload_json TEXT NOT NULL DEFAULT '{}',
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 deleted_at TIMESTAMP,
-                CONSTRAINT chk_saved_task_status CHECK (status IN ('pending', 'in_progress', 'completed', 'failed', 'deleted'))
+                CONSTRAINT chk_saved_task_status CHECK (status IN ('active', 'paused', 'completed', 'failed', 'deleted'))
             )
         """)
 
         self.execute("""
             CREATE INDEX IF NOT EXISTS idx_saved_tasks_status ON saved_tasks(status)
+        """)
+
+        self.execute("""
+            CREATE INDEX IF NOT EXISTS idx_saved_tasks_task_type ON saved_tasks(task_type)
         """)
 
         self.execute("""
@@ -309,18 +315,24 @@ class Database:
         self.execute("""
             CREATE TABLE IF NOT EXISTS saved_tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                status TEXT NOT NULL DEFAULT 'pending',
-                payload TEXT NOT NULL DEFAULT '{}',
-                summary TEXT NOT NULL DEFAULT '{}',
+                task_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                summary_json TEXT NOT NULL DEFAULT '{}',
+                payload_json TEXT NOT NULL DEFAULT '{}',
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 deleted_at TIMESTAMP,
-                CONSTRAINT chk_saved_task_status CHECK (status IN ('pending', 'in_progress', 'completed', 'failed', 'deleted'))
+                CONSTRAINT chk_saved_task_status CHECK (status IN ('active', 'paused', 'completed', 'failed', 'deleted'))
             )
         """)
 
         self.execute("""
             CREATE INDEX IF NOT EXISTS idx_saved_tasks_status ON saved_tasks(status)
+        """)
+
+        self.execute("""
+            CREATE INDEX IF NOT EXISTS idx_saved_tasks_task_type ON saved_tasks(task_type)
         """)
 
         self.execute("""

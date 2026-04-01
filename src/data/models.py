@@ -124,8 +124,8 @@ class Session:
 class SavedTaskStatus(Enum):
     """Status of a saved task."""
 
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
+    ACTIVE = "active"
+    PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
     DELETED = "deleted"
@@ -135,7 +135,9 @@ class SavedTaskStatus(Enum):
 class SavedTask:
     """Persisted task snapshot with JSON payloads."""
 
-    status: SavedTaskStatus = SavedTaskStatus.PENDING
+    task_type: str = ""
+    title: str = ""
+    status: SavedTaskStatus = SavedTaskStatus.ACTIVE
     payload: Dict[str, Any] = field(default_factory=dict)
     summary: Dict[str, Any] = field(default_factory=dict)
     id: Optional[int] = None
@@ -161,9 +163,11 @@ class SavedTask:
         """Create SavedTask from database row."""
         return cls(
             id=row["id"],
+            task_type=row["task_type"],
+            title=row["title"],
             status=SavedTaskStatus(row["status"]),
-            payload=cls._parse_json_object(row["payload"]),
-            summary=cls._parse_json_object(row["summary"]),
+            payload=cls._parse_json_object(row["payload_json"]),
+            summary=cls._parse_json_object(row["summary_json"]),
             created_at=datetime.fromisoformat(row["created_at"])
             if row["created_at"]
             else datetime.now(),

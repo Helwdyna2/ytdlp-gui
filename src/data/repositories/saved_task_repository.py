@@ -15,8 +15,8 @@ class SavedTaskRepository:
     """Repository for saved task snapshots."""
 
     _UNFINISHED_STATUSES = (
-        SavedTaskStatus.PENDING,
-        SavedTaskStatus.IN_PROGRESS,
+        SavedTaskStatus.ACTIVE,
+        SavedTaskStatus.PAUSED,
         SavedTaskStatus.FAILED,
     )
 
@@ -28,13 +28,16 @@ class SavedTaskRepository:
         cursor = self.db.execute(
             """
             INSERT INTO saved_tasks (
-                status, payload, summary, created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                task_type, title, status, summary_json, payload_json,
+                created_at, updated_at, deleted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                task.task_type,
+                task.title,
                 task.status.value,
-                json.dumps(task.payload),
                 json.dumps(task.summary),
+                json.dumps(task.payload),
                 task.created_at.isoformat(),
                 task.updated_at.isoformat(),
                 task.deleted_at.isoformat() if task.deleted_at else None,
@@ -52,13 +55,16 @@ class SavedTaskRepository:
         self.db.execute(
             """
             UPDATE saved_tasks
-            SET status = ?, payload = ?, summary = ?, updated_at = ?, deleted_at = ?
+            SET task_type = ?, title = ?, status = ?,
+                summary_json = ?, payload_json = ?, updated_at = ?, deleted_at = ?
             WHERE id = ?
             """,
             (
+                task.task_type,
+                task.title,
                 task.status.value,
-                json.dumps(task.payload),
                 json.dumps(task.summary),
+                json.dumps(task.payload),
                 task.updated_at.isoformat(),
                 task.deleted_at.isoformat() if task.deleted_at else None,
                 task.id,
