@@ -156,7 +156,7 @@ class TrimPage(QWidget):
 
         main_layout.addLayout(mode_row)
 
-        split = SplitLayout(right_width=360)
+        split = SplitLayout(right_width=460)
         main_layout.addWidget(split, stretch=1)
 
         left_layout = QVBoxLayout(split.left_panel)
@@ -183,8 +183,8 @@ class TrimPage(QWidget):
 
         time_row.addWidget(QLabel("Start:"))
         self._start_input = QLineEdit()
-        self._start_input.setPlaceholderText("0.000")
-        self._start_input.setFixedWidth(100)
+        self._start_input.setPlaceholderText("00:00:00.000")
+        self._start_input.setFixedWidth(140)
         time_row.addWidget(self._start_input)
 
         self._set_start_btn = QPushButton("Set to Current")
@@ -196,8 +196,8 @@ class TrimPage(QWidget):
 
         time_row.addWidget(QLabel("End:"))
         self._end_input = QLineEdit()
-        self._end_input.setPlaceholderText("0.000")
-        self._end_input.setFixedWidth(100)
+        self._end_input.setPlaceholderText("00:00:00.000")
+        self._end_input.setFixedWidth(140)
         time_row.addWidget(self._end_input)
 
         self._set_end_btn = QPushButton("Set to Current")
@@ -223,6 +223,12 @@ class TrimPage(QWidget):
         self._toggle_segment_btn.setObjectName("btnWire")
         self._toggle_segment_btn.setEnabled(False)
         segment_actions.addWidget(self._toggle_segment_btn)
+
+        self._delete_segment_btn = QPushButton("Delete Segment")
+        self._delete_segment_btn.setObjectName("btnDestructive")
+        self._delete_segment_btn.setProperty("button_role", "destructive")
+        self._delete_segment_btn.setEnabled(False)
+        segment_actions.addWidget(self._delete_segment_btn)
 
         self._segment_panel.body_layout.addLayout(segment_actions)
 
@@ -354,6 +360,7 @@ class TrimPage(QWidget):
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._split_btn.clicked.connect(self._on_split_segment)
         self._toggle_segment_btn.clicked.connect(self._on_toggle_segment)
+        self._delete_segment_btn.clicked.connect(self._on_delete_segment)
         self._segment_label_input.editingFinished.connect(
             self._on_segment_label_edited
         )
@@ -554,8 +561,8 @@ class TrimPage(QWidget):
         self._refresh_editor_ui()
 
         # Reset time inputs and timeline
-        self._start_input.setText("0.000")
-        self._end_input.setText("0.000")
+        self._start_input.setText(self._format_timestamp(0.0))
+        self._end_input.setText(self._format_timestamp(0.0))
         self._trim_btn.setEnabled(False)
         self._status_label.setVisible(True)
         self._status_label.setText(f"Loading {Path(path).name}…")
@@ -684,14 +691,14 @@ class TrimPage(QWidget):
         """Set start input to current playback position."""
         if self._video_preview is not None:
             pos = self._video_preview.get_position()
-            self._start_input.setText(f"{pos:.3f}")
+            self._start_input.setText(self._format_timestamp(pos))
             self._sync_inputs_to_session()
 
     def _on_set_end(self) -> None:
         """Set end input to current playback position."""
         if self._video_preview is not None:
             pos = self._video_preview.get_position()
-            self._end_input.setText(f"{pos:.3f}")
+            self._end_input.setText(self._format_timestamp(pos))
             self._sync_inputs_to_session()
 
     def _sync_inputs_to_session(self) -> None:
@@ -699,8 +706,8 @@ class TrimPage(QWidget):
         if self._editor_session.selected_segment is None:
             return
         try:
-            start = float(self._start_input.text())
-            end = float(self._end_input.text())
+            start = self._parse_time_input(self._start_input.text())
+            end = self._parse_time_input(self._end_input.text())
         except ValueError:
             self._refresh_editor_ui()
             return
@@ -759,6 +766,17 @@ class TrimPage(QWidget):
         self._editor_session.set_segment_label(
             segment.id, self._segment_label_input.text()
         )
+        self._refresh_editor_ui()
+        self._schedule_autosave()
+
+    def _on_delete_segment(self) -> None:
+        """Remove the selected segment from the current session."""
+        removed = self._editor_session.delete_segment()
+        if removed is None:
+            return
+
+        self._status_label.setVisible(True)
+        self._status_label.setText("Segment deleted.")
         self._refresh_editor_ui()
         self._schedule_autosave()
 
@@ -1112,8 +1130,8 @@ class TrimPage(QWidget):
         """Update start/end text fields without re-triggering sync."""
         self._start_input.blockSignals(True)
         self._end_input.blockSignals(True)
-        self._start_input.setText(f"{start:.3f}")
-        self._end_input.setText(f"{end:.3f}")
+        self._start_input.setText(self._format_timestamp(start))
+        self._end_input.setText(self._format_timestamp(end))
         self._start_input.blockSignals(False)
         self._end_input.blockSignals(False)
 
@@ -1143,6 +1161,7 @@ class TrimPage(QWidget):
 
         self._split_btn.setEnabled(is_interactive and has_selection)
         self._toggle_segment_btn.setEnabled(is_interactive and has_selection)
+        self._delete_segment_btn.setEnabled(is_interactive and has_selection)
         self._segment_label_input.setEnabled(is_interactive and has_selection)
         self._segment_tags_input.setEnabled(is_interactive and has_selection)
         self._segment_list.setEnabled(is_interactive and has_segments)
@@ -1153,6 +1172,39 @@ class TrimPage(QWidget):
         self._trim_btn.setEnabled(
             is_interactive and source_exists and has_enabled
         )
+
+    def _format_timestamp(self, seconds: float) -> str:
+        seconds = max(0.0, seconds)
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        millis = int(round((seconds - int(seconds)) * 1000))
+        if millis >= 1000:
+            millis -= 1000
+            secs += 1
+        if secs >= 60:
+            secs -= 60
+            minutes += 1
+        if minutes >= 60:
+            minutes -= 60
+            hours += 1
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+    def _parse_time_input(self, value: str) -> float:
+        text = value.strip()
+        if not text:
+            raise ValueError("Time value is empty")
+        if ":" not in text:
+            return float(text)
+
+        parts = text.split(":")
+        if len(parts) != 3:
+            raise ValueError(f"Invalid timestamp: {value}")
+
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = float(parts[2])
+        return max(0.0, hours * 3600 + minutes * 60 + seconds)
 
     def _schedule_autosave(self, *_args) -> None:
         if not self._config_service.get("trim.quick_session_restore", True):
