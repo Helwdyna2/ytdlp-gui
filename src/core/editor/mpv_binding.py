@@ -6,6 +6,8 @@ import ctypes
 import ctypes.util
 import locale
 import logging
+import os
+import shutil
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -121,26 +123,47 @@ class MpvRenderParam(ctypes.Structure):
 
 def _find_mpv_library() -> Optional[str]:
     candidates = []
+    seen = set()
+
+    def add_candidate(candidate: Optional[str]) -> None:
+        if not candidate or candidate in seen:
+            return
+        seen.add(candidate)
+        candidates.append(candidate)
+
+    add_candidate(os.environ.get("MPV_LIBRARY_PATH"))
 
     discovered = ctypes.util.find_library("mpv")
-    if discovered:
-        candidates.append(discovered)
+    add_candidate(discovered)
+
+    mpv_executable = shutil.which("mpv")
+    if mpv_executable:
+        mpv_path = Path(mpv_executable).resolve()
+        add_candidate(str(mpv_path.parent.parent / "lib" / "libmpv.dylib"))
+        add_candidate(str(mpv_path.parent.parent / "lib" / "libmpv.so"))
 
     candidates.extend(
         [
             "/opt/homebrew/lib/libmpv.dylib",
+            "/opt/homebrew/opt/mpv/lib/libmpv.dylib",
             "/usr/local/lib/libmpv.dylib",
+            "/usr/local/opt/mpv/lib/libmpv.dylib",
             "/usr/lib/libmpv.dylib",
-            "libmpv.so",
-            "mpv-2.dll",
-            "mpv-1.dll",
         ]
     )
 
+    add_candidate("libmpv.dylib")
+    add_candidate("libmpv.so")
+    add_candidate("mpv-2.dll")
+    add_candidate("mpv-1.dll")
+
     for candidate in candidates:
         try:
-            if Path(candidate).exists() or not candidate.startswith("/"):
-                return candidate
+            if Path(candidate).is_absolute():
+                if Path(candidate).exists():
+                    return candidate
+                continue
+            return candidate
         except OSError:
             continue
 

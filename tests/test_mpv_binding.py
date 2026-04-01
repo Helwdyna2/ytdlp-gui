@@ -1,6 +1,7 @@
 """Tests for libmpv startup guards."""
 
 import locale
+from pathlib import Path
 
 from src.core.editor import mpv_binding
 
@@ -61,3 +62,35 @@ def test_ensure_c_numeric_locale_reports_failure(monkeypatch):
         (locale.LC_NUMERIC, None),
         (locale.LC_NUMERIC, "C"),
     ]
+
+
+def test_find_mpv_library_prefers_env_override(monkeypatch):
+    monkeypatch.setenv("MPV_LIBRARY_PATH", "/custom/lib/libmpv.dylib")
+    monkeypatch.setattr(mpv_binding.ctypes.util, "find_library", lambda _name: None)
+    monkeypatch.setattr(mpv_binding.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(Path, "exists", lambda self: str(self) == "/custom/lib/libmpv.dylib")
+
+    assert mpv_binding._find_mpv_library() == "/custom/lib/libmpv.dylib"
+
+
+def test_find_mpv_library_uses_discovered_name(monkeypatch):
+    monkeypatch.delenv("MPV_LIBRARY_PATH", raising=False)
+    monkeypatch.setattr(
+        mpv_binding.ctypes.util, "find_library", lambda _name: "libmpv.dylib"
+    )
+    monkeypatch.setattr(mpv_binding.shutil, "which", lambda _name: None)
+
+    assert mpv_binding._find_mpv_library() == "libmpv.dylib"
+
+
+def test_find_mpv_library_uses_mpv_executable_location(monkeypatch):
+    monkeypatch.delenv("MPV_LIBRARY_PATH", raising=False)
+    monkeypatch.setattr(mpv_binding.ctypes.util, "find_library", lambda _name: None)
+    monkeypatch.setattr(mpv_binding.shutil, "which", lambda _name: "/opt/homebrew/bin/mpv")
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda self: str(self) == "/opt/homebrew/lib/libmpv.dylib",
+    )
+
+    assert mpv_binding._find_mpv_library() == "/opt/homebrew/lib/libmpv.dylib"
