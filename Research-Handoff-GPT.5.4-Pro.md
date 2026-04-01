@@ -2102,4 +2102,4 @@ Top 10 prototype tasks to validate first
 	7.	Cross-file compatibility analyzer with hard-block vs warn
 	8.	Quick-session autosave + reopen + relink
 	9.	Background waveform/thumbnails while playback stays responsive
-	10.	First packaged build with bundled libmpv + ffmpeg/ffprobe + compliance manifest
+	10.	First packaged build with bundled libmpv + ffmpeg/ffprobe + compliance manifes
