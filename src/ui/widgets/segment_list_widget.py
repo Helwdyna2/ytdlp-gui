@@ -46,6 +46,7 @@ class SegmentListWidget(QWidget):
         self._tree.setHeaderLabels(["Segment", "Range", "Label"])
         self._tree.setRootIsDecorated(False)
         self._tree.setAlternatingRowColors(True)
+        self._tree.setMinimumHeight(220)
         self._tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._tree.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked
