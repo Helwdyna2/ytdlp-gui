@@ -29,8 +29,9 @@ from ...data.models import TrimConfig
 from ...services.config_service import ConfigService
 from ...utils.constants import VIDEO_FILE_FILTER
 from ...utils.dialog_utils import get_dialog_start_dir, update_dialog_last_dir
-from ...utils.platform_utils import Platform, get_platform
+from ..components.data_panel import DataPanel
 from ..components.page_header import PageHeader
+from ..components.split_layout import SplitLayout
 from ..widgets.segment_list_widget import SegmentListWidget
 from ..widgets.trim_timeline_widget import TrimTimelineWidget
 from ..widgets.video_preview_widget import VideoPreviewWidget
@@ -121,54 +122,28 @@ class TrimPage(QWidget):
 
         main_layout.addLayout(mode_row)
 
-        # 3. Video preview
-        if self._video_preview is not None:
-            self._preview_container = self._video_preview
-        else:
-            placeholder = QLabel(
-                "Preview playback is temporarily disabled on macOS while the new "
-                "editor backend is being stabilized.\n\n"
-                "You can still load the file, split segments, label them, and "
-                "export enabled ranges."
-            )
-            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            placeholder.setWordWrap(True)
-            placeholder.setObjectName("dimLabel")
-            placeholder.setMinimumHeight(200)
-            self._preview_container = placeholder
-        main_layout.addWidget(self._preview_container, stretch=3)
+        split = SplitLayout(right_width=360)
+        main_layout.addWidget(split, stretch=1)
 
-        # 4. Timeline
+        left_layout = QVBoxLayout(split.left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(12)
+
+        right_layout = QVBoxLayout(split.right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(12)
+
+        # 3. Preview panel
+        self._preview_panel = DataPanel("Preview")
+        self._preview_container = self._video_preview
+        self._preview_panel.body_layout.addWidget(self._preview_container)
+        left_layout.addWidget(self._preview_panel, stretch=5)
+
+        # 4. Timeline panel
+        self._timeline_panel = DataPanel("Timeline")
         self._timeline_container = self._trim_timeline
-        main_layout.addWidget(self._timeline_container)
+        self._timeline_panel.body_layout.addWidget(self._timeline_container)
 
-        # 4b. Segment editor controls
-        segment_row = QHBoxLayout()
-        segment_row.setSpacing(8)
-
-        self._split_btn = QPushButton("Split at Current")
-        self._split_btn.setObjectName("btnWire")
-        self._split_btn.setEnabled(False)
-        segment_row.addWidget(self._split_btn)
-
-        self._toggle_segment_btn = QPushButton("Disable Segment")
-        self._toggle_segment_btn.setObjectName("btnWire")
-        self._toggle_segment_btn.setEnabled(False)
-        segment_row.addWidget(self._toggle_segment_btn)
-
-        segment_row.addWidget(QLabel("Label:"))
-        self._segment_label_input = QLineEdit()
-        self._segment_label_input.setPlaceholderText("Optional segment label")
-        self._segment_label_input.setEnabled(False)
-        segment_row.addWidget(self._segment_label_input, stretch=1)
-
-        main_layout.addLayout(segment_row)
-
-        self._segment_list = SegmentListWidget()
-        self._segment_list.setEnabled(False)
-        main_layout.addWidget(self._segment_list)
-
-        # 5. Time controls row
         time_row = QHBoxLayout()
         time_row.setSpacing(12)
 
@@ -197,28 +172,55 @@ class TrimPage(QWidget):
         time_row.addWidget(self._set_end_btn)
 
         time_row.addStretch()
-        main_layout.addLayout(time_row)
+        self._timeline_panel.body_layout.addLayout(time_row)
+        left_layout.addWidget(self._timeline_panel, stretch=2)
 
-        # 6. Options row
-        options_row = QHBoxLayout()
-        options_row.setSpacing(12)
+        # 5. Segments panel
+        self._segment_panel = DataPanel("Segments")
+        segment_actions = QHBoxLayout()
+        segment_actions.setSpacing(8)
+
+        self._split_btn = QPushButton("Split at Current")
+        self._split_btn.setObjectName("btnWire")
+        self._split_btn.setEnabled(False)
+        segment_actions.addWidget(self._split_btn)
+
+        self._toggle_segment_btn = QPushButton("Disable Segment")
+        self._toggle_segment_btn.setObjectName("btnWire")
+        self._toggle_segment_btn.setEnabled(False)
+        segment_actions.addWidget(self._toggle_segment_btn)
+
+        self._segment_panel.body_layout.addLayout(segment_actions)
+
+        label_row = QHBoxLayout()
+        label_row.setSpacing(8)
+        label_row.addWidget(QLabel("Label"))
+        self._segment_label_input = QLineEdit()
+        self._segment_label_input.setPlaceholderText("Optional segment label")
+        self._segment_label_input.setEnabled(False)
+        label_row.addWidget(self._segment_label_input, stretch=1)
+        self._segment_panel.body_layout.addLayout(label_row)
+
+        self._segment_list = SegmentListWidget()
+        self._segment_list.setEnabled(False)
+        self._segment_panel.body_layout.addWidget(self._segment_list, stretch=1)
+        right_layout.addWidget(self._segment_panel, stretch=4)
+
+        # 6. Export panel
+        self._export_panel = DataPanel("Export")
 
         self._lossless_checkbox = QCheckBox(
-            "Lossless (fast \u2014 may shift to nearest keyframe)"
+            "Lossless export (fast, keyframe-limited)"
         )
         self._lossless_checkbox.setChecked(True)
         self._lossless_checkbox.setToolTip(
             "Copy streams without re-encoding. Very fast but cuts at keyframes only."
         )
-        options_row.addWidget(self._lossless_checkbox)
-        options_row.addStretch()
-        main_layout.addLayout(options_row)
+        self._export_panel.body_layout.addWidget(self._lossless_checkbox)
 
-        # 7. Output folder row
         output_row = QHBoxLayout()
         output_row.setSpacing(8)
-
-        output_row.addWidget(QLabel("Output folder:"))
+        output_row.addWidget(QLabel("Output"))
 
         self._output_input = QLineEdit()
         self._output_input.setPlaceholderText("Same as input (adds _trimmed suffix)")
@@ -227,10 +229,8 @@ class TrimPage(QWidget):
         self._output_browse_btn = QPushButton("Browse")
         self._output_browse_btn.setObjectName("btnWire")
         output_row.addWidget(self._output_browse_btn)
+        self._export_panel.body_layout.addLayout(output_row)
 
-        main_layout.addLayout(output_row)
-
-        # 8. Action bar
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
 
@@ -239,7 +239,6 @@ class TrimPage(QWidget):
         self._cancel_btn.setProperty("button_role", "secondary")
         self._cancel_btn.setVisible(False)
         action_row.addWidget(self._cancel_btn)
-
         action_row.addStretch()
 
         self._trim_btn = QPushButton("Trim Video")
@@ -248,22 +247,20 @@ class TrimPage(QWidget):
         self._trim_btn.setEnabled(False)
         self._trim_btn.setMinimumWidth(120)
         action_row.addWidget(self._trim_btn)
+        self._export_panel.body_layout.addLayout(action_row)
 
-        main_layout.addLayout(action_row)
-
-        # 9. Progress section
         self._progress_bar = QProgressBar()
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
         self._progress_bar.setVisible(False)
-        main_layout.addWidget(self._progress_bar)
+        self._export_panel.body_layout.addWidget(self._progress_bar)
 
         self._status_label = QLabel("")
         self._status_label.setObjectName("dimLabel")
         self._status_label.setVisible(False)
-        main_layout.addWidget(self._status_label)
-
-        main_layout.addStretch()
+        self._status_label.setWordWrap(True)
+        self._export_panel.body_layout.addWidget(self._status_label)
+        right_layout.addWidget(self._export_panel, stretch=2)
 
     # ------------------------------------------------------------------ #
     #  Signal wiring                                                       #
@@ -326,13 +323,7 @@ class TrimPage(QWidget):
         manager.all_completed.connect(self._on_all_completed)
 
     def _build_default_video_preview(self) -> Optional[VideoPreviewWidget]:
-        """Return the safest default preview implementation for this platform."""
-        if get_platform() == Platform.MACOS:
-            logger.warning(
-                "Disabling the legacy mpv preview widget on macOS for Trim until "
-                "the new embedded playback backend is ready."
-            )
-            return None
+        """Return the default preview widget for the Trim page."""
         return VideoPreviewWidget()
 
     # ------------------------------------------------------------------ #
@@ -362,13 +353,9 @@ class TrimPage(QWidget):
         """Handle mode combo change."""
         is_single = index == self._MODE_SINGLE
         self._load_video_btn.setVisible(is_single)
-        # Preview + timeline only shown in single mode
-        self._preview_container.setVisible(is_single)
-        self._timeline_container.setVisible(is_single)
-        self._split_btn.setVisible(is_single)
-        self._toggle_segment_btn.setVisible(is_single)
-        self._segment_label_input.setVisible(is_single)
-        self._segment_list.setVisible(is_single)
+        self._preview_panel.setVisible(is_single)
+        self._timeline_panel.setVisible(is_single)
+        self._segment_panel.setVisible(is_single)
         self._apply_editor_control_state()
 
     def _on_load_video(self) -> None:
