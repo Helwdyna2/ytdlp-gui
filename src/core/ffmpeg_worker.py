@@ -159,6 +159,10 @@ class FFmpegWorker(QThread):
             encoder,
         ]
 
+        scale_filter = self._build_scale_filter()
+        if scale_filter:
+            cmd.extend(["-vf", scale_filter])
+
         # Add quality settings based on encoder type
         if "nvenc" in encoder:
             # NVIDIA NVENC uses -cq for constant quality
@@ -193,6 +197,26 @@ class FFmpegWorker(QThread):
         cmd.append(self._output_path)
 
         return cmd
+
+    def _build_scale_filter(self) -> Optional[str]:
+        """Build a scale/pad filter for the selected output resolution."""
+        if self._config.output_codec not in {"h264", "hevc", "vp9"}:
+            return None
+
+        resolution = (self._config.output_resolution or "").strip().lower()
+        if not resolution:
+            return None
+
+        match = re.fullmatch(r"(\d+)x(\d+)", resolution)
+        if not match:
+            logger.warning("Ignoring invalid output resolution: %s", resolution)
+            return None
+
+        width, height = match.groups()
+        return (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease:"
+            f"force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+        )
 
     def _nvenc_preset(self, preset: str) -> str:
         """Map standard preset to NVENC preset."""

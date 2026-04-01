@@ -38,6 +38,7 @@ def fake_config_service(monkeypatch, convert_page_module):
         def __init__(self):
             self.values = {
                 "convert.codec": "h264",
+                "convert.resolution": "source",
                 "convert.crf": 23,
                 "convert.preset": "medium",
                 "convert.output_dir": "",
@@ -98,9 +99,21 @@ def fake_ffprobe_worker(monkeypatch, convert_page_module):
 
             results = []
             for path in self.file_paths:
-                codec = type(self).results_by_path.get(path)
-                if codec:
-                    results.append(VideoMetadata(file_path=path, codec=codec))
+                metadata = type(self).results_by_path.get(path)
+                if not metadata:
+                    continue
+
+                if isinstance(metadata, str):
+                    metadata = {"codec": metadata}
+
+                results.append(
+                    VideoMetadata(
+                        file_path=path,
+                        codec=metadata.get("codec", ""),
+                        width=metadata.get("width", 0),
+                        height=metadata.get("height", 0),
+                    )
+                )
             self.completed.emit(results)
 
         def cancel(self):
@@ -503,6 +516,51 @@ def test_convert_page_build_config_respects_hw_selection(
     assert config.output_codec == "h264"
     assert config.use_hardware_accel is True
     assert config.hardware_encoder == "videotoolbox"
+
+
+def test_convert_page_resolution_defaults_to_horizontal_presets(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    page = ConvertPage()
+
+    assert page._resolution_combo.itemText(0) == "Same as source"
+    assert page._resolution_combo.itemText(1) == "3840x2160"
+    assert page._resolution_combo.itemText(4) == "1280x720"
+    assert page._resolution_combo.itemText(6) == "2160x3840 (Vertical override)"
+
+
+def test_convert_page_resolution_switches_to_vertical_when_source_is_vertical(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/clip.mp4": {"codec": "h264", "width": 1080, "height": 1920},
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/clip.mp4"])
+    qapp.processEvents()
+
+    assert page._resolution_combo.itemText(1) == "2160x3840"
+    assert page._resolution_combo.itemText(4) == "720x1280"
+    assert page._resolution_combo.itemText(6) == "3840x2160 (Horizontal override)"
+
+
+def test_convert_page_build_config_uses_selected_output_resolution(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    page = ConvertPage()
+    index = page._resolution_combo.findText("1920x1080")
+    page._resolution_combo.setCurrentIndex(index)
+
+    config = page._build_config()
+
+    assert config.output_resolution == "1920x1080"
 
 
 def test_convert_page_shows_preview_tree_for_nested_folder_inputs(

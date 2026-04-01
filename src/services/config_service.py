@@ -65,6 +65,7 @@ DEFAULT_CONFIG = {
     "convert": {
         "output_dir": "",
         "codec": "h264",
+        "resolution": "source",
         "crf": 23,
         "preset": "medium",
         "use_hardware_accel": False,
