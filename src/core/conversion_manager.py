@@ -235,7 +235,9 @@ class ConversionManager(QObject):
         # Generate output filename
         input_file = Path(input_path)
         resolved_output_path = output_path or build_conversion_output_path(
-            input_path, output_dir=output_dir
+            input_path,
+            output_dir=output_dir,
+            output_codec=config.output_codec,
         )
 
         # Get input file size

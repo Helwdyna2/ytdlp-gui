@@ -4,21 +4,41 @@ from pathlib import Path
 from typing import Optional
 
 
-def build_conversion_output_name(input_path: str) -> str:
+OUTPUT_EXTENSION_BY_CODEC = {
+    "h264": ".mp4",
+    "hevc": ".mp4",
+    "vp9": ".webm",
+    "mp3": ".mp3",
+    "aac": ".aac",
+    "flac": ".flac",
+}
+
+
+def get_conversion_output_extension(output_codec: str) -> str:
+    """Resolve the file extension for the selected conversion format."""
+    normalized_codec = (output_codec or "h264").strip().lower()
+    return OUTPUT_EXTENSION_BY_CODEC.get(normalized_codec, ".mp4")
+
+
+def build_conversion_output_name(input_path: str, output_codec: str = "h264") -> str:
     """Build the converted filename for an input path."""
-    return f"{Path(input_path).stem}_converted.mp4"
+    extension = get_conversion_output_extension(output_codec)
+    return f"{Path(input_path).stem}_converted{extension}"
 
 
 def build_conversion_output_path(
     input_path: str,
     output_dir: Optional[str] = None,
     source_root: Optional[str] = None,
+    output_codec: str = "h264",
 ) -> str:
     """Build the full output path for a conversion job."""
     target_dir = resolve_conversion_output_dir(
         input_path, output_dir=output_dir, source_root=source_root
     )
-    return str(target_dir / build_conversion_output_name(input_path))
+    return str(
+        target_dir / build_conversion_output_name(input_path, output_codec=output_codec)
+    )
 
 
 def get_conversion_preview_folder(

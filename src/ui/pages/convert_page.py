@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -26,6 +26,7 @@ from ...core.conversion_manager import ConversionManager
 from ...core.conversion_paths import (
     build_conversion_output_name,
     build_conversion_output_path,
+    get_conversion_output_extension,
     get_conversion_preview_folder,
 )
 from ...core.ffprobe_worker import FFprobeWorker
@@ -63,13 +64,6 @@ OUTPUT_FORMATS = [
     ("flac", "flac"),
 ]
 
-SOURCE_CODEC_DISPLAY_NAMES = {
-    "h264": "H.264",
-    "hevc": "H.265 (HEVC)",
-    "vp9": "VP9",
-}
-
-TARGET_CODECS_WITH_SOURCE_FILTER = {"h264", "hevc"}
 FILE_PATH_ROLE = int(Qt.ItemDataRole.UserRole)
 SOURCE_ROOT_ROLE = FILE_PATH_ROLE + 1
 RESOLUTION_DATA_ROLE = SOURCE_ROOT_ROLE + 1
@@ -101,11 +95,20 @@ class FileListWidget(QWidget):
     """Widget for managing the list of files to convert."""
 
     files_changed = pyqtSignal()  # Emitted when files are added/removed
+    loading_state_changed = pyqtSignal(bool)
+
+    RENDER_BATCH_SIZE = 200
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._scan_worker: Optional[FolderScanWorker] = None
         self._scan_root: Optional[str] = None
+        self._entries: List[Tuple[str, Optional[str]]] = []
+        self._render_index = 0
+        self._loading_state = False
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.timeout.connect(self._render_next_batch)
         self._setup_ui()
         self._connect_signals()
 
@@ -198,6 +201,7 @@ class FileListWidget(QWidget):
             self._scan_worker.deleteLater()
             self._scan_worker = None
         self._scan_root = None
+        self._update_loading_state()
 
     def _on_scan_error(self, error_message: str) -> None:
         """Handle folder scan error."""
@@ -215,19 +219,24 @@ class FileListWidget(QWidget):
             self._scan_worker.deleteLater()
             self._scan_worker = None
         self._scan_root = None
+        self._update_loading_state()
 
     def _add_paths(
         self, paths: List[str], source_root: Optional[str] = None
     ) -> None:
         """Add file paths to the list, skipping duplicates."""
         existing = set(self.get_file_paths())
+        added_any = False
         for path in paths:
             if path not in existing:
-                item = QListWidgetItem(self._display_name_for_path(path, source_root))
-                item.setData(FILE_PATH_ROLE, path)
-                item.setData(SOURCE_ROOT_ROLE, source_root)
-                item.setToolTip(path)
-                self._list_widget.addItem(item)
+                self._entries.append((path, source_root))
+                existing.add(path)
+                added_any = True
+
+        if not added_any:
+            return
+
+        self._schedule_render()
         self.files_changed.emit()
 
     def _display_name_for_path(self, path: str, source_root: Optional[str]) -> str:
@@ -242,34 +251,37 @@ class FileListWidget(QWidget):
 
     def _on_remove(self) -> None:
         """Remove selected files."""
-        for item in self._list_widget.selectedItems():
-            self._list_widget.takeItem(self._list_widget.row(item))
+        selected_paths = {
+            item.data(FILE_PATH_ROLE) for item in self._list_widget.selectedItems()
+        }
+        if not selected_paths:
+            return
+
+        self._entries = [
+            entry for entry in self._entries if entry[0] not in selected_paths
+        ]
+        self._rebuild_list_widget()
         self.files_changed.emit()
 
     def _on_clear(self) -> None:
         """Clear all files."""
+        if not self._entries:
+            return
+
+        self._entries = []
+        self._render_index = 0
+        self._render_timer.stop()
         self._list_widget.clear()
+        self._update_loading_state()
         self.files_changed.emit()
 
     def get_file_paths(self) -> List[str]:
         """Get all file paths in the list."""
-        paths = []
-        for i in range(self._list_widget.count()):
-            item = self._list_widget.item(i)
-            if item is not None:
-                paths.append(item.data(FILE_PATH_ROLE))
-        return paths
+        return [path for path, _source_root in self._entries]
 
     def get_entries(self) -> List[Tuple[str, Optional[str]]]:
         """Get all file entries with their optional source roots."""
-        entries: List[Tuple[str, Optional[str]]] = []
-        for i in range(self._list_widget.count()):
-            item = self._list_widget.item(i)
-            if item is not None:
-                entries.append(
-                    (item.data(FILE_PATH_ROLE), item.data(SOURCE_ROOT_ROLE))
-                )
-        return entries
+        return list(self._entries)
 
     def get_selected_file_path(self) -> Optional[str]:
         """Get the first selected file path, or None if no selection."""
@@ -280,7 +292,11 @@ class FileListWidget(QWidget):
 
     def count(self) -> int:
         """Get number of files."""
-        return self._list_widget.count()
+        return len(self._entries)
+
+    def is_busy(self) -> bool:
+        """Return whether the list is still scanning or rendering."""
+        return self._scan_worker is not None or self._render_index < len(self._entries)
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable/disable the widget."""
@@ -289,6 +305,52 @@ class FileListWidget(QWidget):
         self._remove_btn.setEnabled(enabled)
         self._clear_btn.setEnabled(enabled)
         self._list_widget.setEnabled(enabled)
+
+    def _schedule_render(self) -> None:
+        """Render pending list items in batches."""
+        if self._render_index >= len(self._entries):
+            self._update_loading_state()
+            return
+
+        self._update_loading_state()
+        pending_count = len(self._entries) - self._render_index
+        if pending_count <= self.RENDER_BATCH_SIZE and not self._render_timer.isActive():
+            self._render_next_batch()
+            return
+
+        if not self._render_timer.isActive():
+            self._render_timer.start(0)
+
+    def _render_next_batch(self) -> None:
+        """Append the next batch of queued items to the visible list."""
+        end_index = min(self._render_index + self.RENDER_BATCH_SIZE, len(self._entries))
+        for path, source_root in self._entries[self._render_index:end_index]:
+            item = QListWidgetItem(self._display_name_for_path(path, source_root))
+            item.setData(FILE_PATH_ROLE, path)
+            item.setData(SOURCE_ROOT_ROLE, source_root)
+            item.setToolTip(path)
+            self._list_widget.addItem(item)
+
+        self._render_index = end_index
+        if self._render_index < len(self._entries):
+            self._render_timer.start(0)
+
+        self._update_loading_state()
+
+    def _rebuild_list_widget(self) -> None:
+        """Re-render the visible list from the internal entry model."""
+        self._render_timer.stop()
+        self._list_widget.clear()
+        self._render_index = 0
+        self._schedule_render()
+
+    def _update_loading_state(self) -> None:
+        """Emit loading changes when scan/render state changes."""
+        is_loading = self.is_busy()
+        if self._loading_state == is_loading:
+            return
+        self._loading_state = is_loading
+        self.loading_state_changed.emit(is_loading)
 
 
 class ConvertPage(QWidget):
@@ -308,8 +370,8 @@ class ConvertPage(QWidget):
     def __init__(self, conversion_manager=None, parent=None):
         super().__init__(parent)
         self._conversion_manager: Optional[ConversionManager] = conversion_manager
-        self._codec_probe_worker: Optional[FFprobeWorker] = None
-        self._codec_probe_request_id = 0
+        self._preflight_worker: Optional[FFprobeWorker] = None
+        self._preflight_request_id = 0
         self._pending_job_widgets: Dict[int, str] = {}  # job_id -> filename
         self._done_count: int = 0
         self._failed_count: int = 0
@@ -323,7 +385,7 @@ class ConvertPage(QWidget):
         self._connect_signals()
         self._load_settings()
         self._detect_hardware()
-        self._refresh_source_codec_scan()
+        self._refresh_preflight_scan()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -443,12 +505,14 @@ class ConvertPage(QWidget):
         self._hw_status_label.setVisible(False)
         sl.addWidget(self._hw_status_label)
 
-        self._source_codec_filter_check = QCheckBox("Only convert source codec")
+        self._source_codec_filter_check = QCheckBox(
+            "Skip files already in selected output format"
+        )
         sl.addWidget(self._source_codec_filter_check)
 
-        self._source_codec_combo = QComboBox()
-        self._source_codec_combo.setEnabled(False)
-        sl.addWidget(self._source_codec_combo)
+        self._preflight_status_label = QLabel("Add files to prepare the queue.")
+        self._preflight_status_label.setWordWrap(True)
+        sl.addWidget(self._preflight_status_label)
 
         # Output Folder
         sl.addWidget(QLabel("Output Folder"))
@@ -481,6 +545,7 @@ class ConvertPage(QWidget):
     def _connect_signals(self) -> None:
         """Wire up all signal connections."""
         self._file_list.files_changed.connect(self._on_files_changed)
+        self._file_list.loading_state_changed.connect(self._on_file_list_loading_changed)
         self._start_btn.clicked.connect(self._on_start)
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._crf_slider.valueChanged.connect(self._on_crf_changed)
@@ -488,10 +553,7 @@ class ConvertPage(QWidget):
         self._resolution_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._preset_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._hw_combo.currentIndexChanged.connect(self._on_settings_changed)
-        self._source_codec_filter_check.toggled.connect(
-            self._on_source_codec_filter_toggled
-        )
-        self._source_codec_combo.currentIndexChanged.connect(self._on_settings_changed)
+        self._source_codec_filter_check.toggled.connect(self._on_settings_changed)
         self._output_input.textChanged.connect(self._on_settings_changed)
         self._output_input.textChanged.connect(self._update_preview)
         self._output_browse_btn.clicked.connect(self._on_browse_output)
@@ -529,14 +591,13 @@ class ConvertPage(QWidget):
             self._output_input.setText(output_dir)
 
             source_filter_enabled = self._config_service.get(
-                "convert.source_codec_filter_enabled", False
+                "convert.skip_matching_output_enabled", False
             )
             self._source_codec_filter_check.setChecked(source_filter_enabled)
         finally:
             self._loading_settings = False
 
-        self._refresh_source_codec_combo()
-        self._update_source_filter_controls()
+        self._update_start_button_state()
 
     def _save_settings(self) -> None:
         """Save current settings to config service."""
@@ -545,8 +606,6 @@ class ConvertPage(QWidget):
 
         codec = self._get_selected_output_codec()
         hardware_encoder = self._hw_combo.currentData()
-        source_codec = self._get_selected_source_codec()
-
         self._config_service.set("convert.codec", codec)
         self._config_service.set("convert.resolution", self._get_selected_resolution())
         self._config_service.set("convert.crf", self._crf_slider.value())
@@ -556,10 +615,9 @@ class ConvertPage(QWidget):
         )
         self._config_service.set("convert.hardware_encoder", hardware_encoder or "")
         self._config_service.set(
-            "convert.source_codec_filter_enabled",
+            "convert.skip_matching_output_enabled",
             self._source_codec_filter_check.isChecked(),
         )
-        self._config_service.set("convert.source_codec_filter", source_codec or "")
         self._config_service.set("convert.output_dir", self._output_input.text())
 
     def _detect_hardware(self) -> None:
@@ -590,12 +648,8 @@ class ConvertPage(QWidget):
         self._refresh_hardware_options(
             preferred_name=preferred_hardware, prefer_none=preferred_hardware is None
         )
-        self._update_source_filter_controls()
-        self._on_settings_changed()
-
-    def _on_source_codec_filter_toggled(self, checked: bool) -> None:
-        """Enable or disable the source codec selector."""
-        self._update_source_filter_controls()
+        self._update_preview()
+        self._update_start_button_state()
         self._on_settings_changed()
 
     def _on_settings_changed(self) -> None:
@@ -615,10 +669,14 @@ class ConvertPage(QWidget):
             self._output_input.setText(folder)
 
     def _on_files_changed(self) -> None:
-        """Enable/disable start button based on file count."""
-        self._start_btn.setEnabled(self._file_list.count() > 0)
-        self._refresh_source_codec_scan()
+        """Refresh queue readiness when the file set changes."""
+        self._refresh_preflight_scan()
         self._update_preview()
+        self._update_start_button_state()
+
+    def _on_file_list_loading_changed(self, _loading: bool) -> None:
+        """Refresh readiness state while the list is still rendering."""
+        self._update_start_button_state()
 
     def _on_start(self) -> None:
         """Start conversion."""
@@ -626,42 +684,35 @@ class ConvertPage(QWidget):
         if not files:
             return
 
+        if self._file_list.is_busy() or self._preflight_worker is not None:
+            QMessageBox.information(
+                self,
+                "Preparing Queue",
+                "Please wait for file loading and analysis to finish before starting the conversion.",
+            )
+            return
+
         files_to_convert = files
-        selected_source_codec = None
-        if self._is_source_codec_filter_active():
-            if self._codec_probe_worker is not None:
-                QMessageBox.information(
-                    self,
-                    "Scanning Codecs",
-                    "Please wait for codec detection to finish before starting a filtered conversion.",
-                )
-                return
-
-            selected_source_codec = self._get_selected_source_codec()
-            if not selected_source_codec:
-                QMessageBox.information(
-                    self,
-                    "No Source Codec Selected",
-                    "Choose a source codec to filter before starting the conversion.",
-                )
-                return
-
+        selected_output_format = self._codec_combo.currentText()
+        if self._source_codec_filter_check.isChecked():
             files_to_convert = [
-                path for path in files if self._file_codecs.get(path) == selected_source_codec
+                path
+                for path in files
+                if not self._matches_selected_output_format(path)
             ]
             skipped_count = len(files) - len(files_to_convert)
             if not files_to_convert:
                 QMessageBox.information(
                     self,
-                    "No Matching Files",
-                    f'No files match the selected source codec "{self._format_source_codec_label(selected_source_codec)}".',
+                    "Nothing To Convert",
+                    f'All selected files already match "{selected_output_format}".',
                 )
                 return
             if skipped_count > 0:
                 QMessageBox.information(
                     self,
-                    "Skipping Non-Matching Files",
-                    f"Skipping {skipped_count} file(s) that do not match {self._format_source_codec_label(selected_source_codec)}.",
+                    "Skipping Matching Files",
+                    f"Skipping {skipped_count} file(s) that already match {selected_output_format}.",
                 )
 
         config = self._build_config()
@@ -782,7 +833,6 @@ class ConvertPage(QWidget):
     def _on_all_completed(self) -> None:
         """Reset UI after all conversions finish."""
         self._file_list.set_enabled(True)
-        self._start_btn.setEnabled(self._file_list.count() > 0)
         self._cancel_btn.setVisible(False)
         self._overall_progress.setVisible(False)
 
@@ -811,6 +861,7 @@ class ConvertPage(QWidget):
         self._failed_count = 0
         if self._jobs_list.count() == 0:
             self._jobs_list.setVisible(False)
+        self._update_start_button_state()
 
     def _on_files_deleted(self, count: int, paths: List[str]) -> None:
         """Notify user when zero-byte files are moved to trash."""
@@ -949,13 +1000,17 @@ class ConvertPage(QWidget):
         self._set_selected_resolution(selected_resolution)
         self._resolution_combo.blockSignals(False)
 
-    def _get_selected_source_codec(self) -> Optional[str]:
-        """Get the selected source codec filter."""
-        return self._source_codec_combo.currentData()
+    def _matches_selected_output_format(self, file_path: str) -> bool:
+        """Return whether the input already matches the selected output format."""
+        output_codec = self._get_selected_output_codec()
+        expected_extension = get_conversion_output_extension(output_codec)
+        if Path(file_path).suffix.lower() != expected_extension:
+            return False
 
-    def _format_source_codec_label(self, codec: str) -> str:
-        """Get a user-facing source codec label."""
-        return SOURCE_CODEC_DISPLAY_NAMES.get(codec, codec.upper())
+        if output_codec in {"h264", "hevc", "vp9"}:
+            return self._file_codecs.get(file_path) == output_codec
+
+        return True
 
     def _format_hardware_label(self, encoder: HardwareEncoder) -> str:
         """Get a compact user-facing hardware encoder label."""
@@ -966,17 +1021,6 @@ class ConvertPage(QWidget):
             "qsv": "Intel Quick Sync",
         }
         return label_map.get(encoder.name, encoder.display_name)
-
-    def _is_source_codec_filter_supported(self) -> bool:
-        """Check whether source filtering is supported for the current target."""
-        return self._get_selected_output_codec() in TARGET_CODECS_WITH_SOURCE_FILTER
-
-    def _is_source_codec_filter_active(self) -> bool:
-        """Check whether source filtering should be applied."""
-        return (
-            self._is_source_codec_filter_supported()
-            and self._source_codec_filter_check.isChecked()
-        )
 
     def _refresh_hardware_options(
         self, preferred_name: Optional[str], prefer_none: bool
@@ -1021,9 +1065,9 @@ class ConvertPage(QWidget):
         self._hw_status_label.setVisible(bool(status_message))
         self._hw_combo.blockSignals(False)
 
-    def _refresh_source_codec_scan(self) -> None:
-        """Probe the current file list and extract source codec options."""
-        self._cancel_source_codec_scan()
+    def _refresh_preflight_scan(self) -> None:
+        """Probe the current file list and cache metadata needed for conversion."""
+        self._cancel_preflight_scan()
 
         current_paths = self._file_list.get_file_paths()
         self._file_codecs = {
@@ -1036,91 +1080,49 @@ class ConvertPage(QWidget):
         }
 
         if not current_paths:
-            self._refresh_source_codec_combo()
             self._refresh_resolution_options()
-            self._update_source_filter_controls()
+            self._update_start_button_state()
             return
 
-        self._codec_probe_request_id += 1
-        request_id = self._codec_probe_request_id
-        self._set_source_codec_placeholder("Scanning file codecs...")
-        self._update_source_filter_controls()
+        self._preflight_request_id += 1
+        request_id = self._preflight_request_id
 
         worker = FFprobeWorker(
             current_paths,
             trash_zero_byte_files=False,
             parent=self,
         )
-        self._codec_probe_worker = worker
+        self._preflight_worker = worker
         worker.completed.connect(
-            lambda results, rid=request_id, active_worker=worker: self._on_source_codec_scan_completed(
+            lambda results, rid=request_id, active_worker=worker: self._on_preflight_scan_completed(
                 rid, active_worker, results
             )
         )
         worker.error.connect(
-            lambda file_path, error, rid=request_id: self._on_source_codec_scan_error(
+            lambda file_path, error, rid=request_id: self._on_preflight_scan_error(
                 rid, file_path, error
             )
         )
         worker.start()
+        self._update_start_button_state()
 
-    def _cancel_source_codec_scan(self) -> None:
-        """Cancel any in-progress source codec probe."""
-        if self._codec_probe_worker is not None:
-            self._codec_probe_worker.cancel()
-            self._codec_probe_worker.deleteLater()
-            self._codec_probe_worker = None
+    def _cancel_preflight_scan(self) -> None:
+        """Cancel any in-progress metadata probe."""
+        if self._preflight_worker is not None:
+            self._preflight_worker.cancel()
+            self._preflight_worker.deleteLater()
+            self._preflight_worker = None
 
-    def _set_source_codec_placeholder(self, text: str) -> None:
-        """Show a disabled placeholder entry in the source codec combo."""
-        self._source_codec_combo.blockSignals(True)
-        self._source_codec_combo.clear()
-        self._source_codec_combo.addItem(text, None)
-        self._source_codec_combo.setCurrentIndex(0)
-        self._source_codec_combo.blockSignals(False)
-
-    def _refresh_source_codec_combo(self) -> None:
-        """Refresh the source codec combo from the latest probe results."""
-        preferred_codec = self._normalize_source_codec(
-            self._config_service.get("convert.source_codec_filter", "")
-        )
-        unique_codecs = sorted(set(self._file_codecs.values()))
-
-        self._source_codec_combo.blockSignals(True)
-        self._source_codec_combo.clear()
-        for codec in unique_codecs:
-            self._source_codec_combo.addItem(
-                self._format_source_codec_label(codec), codec
-            )
-
-        if unique_codecs:
-            index = self._source_codec_combo.findData(preferred_codec)
-            self._source_codec_combo.setCurrentIndex(index if index >= 0 else 0)
-        self._source_codec_combo.blockSignals(False)
-
-    def _update_source_filter_controls(self) -> None:
-        """Update enabled state for source filtering controls."""
-        has_source_codecs = self._source_codec_combo.count() > 0 and (
-            self._source_codec_combo.itemData(0) is not None
-        )
-        filter_supported = self._is_source_codec_filter_supported()
-        can_enable_filter = filter_supported and has_source_codecs
-
-        self._source_codec_filter_check.setEnabled(can_enable_filter)
-        self._source_codec_combo.setEnabled(
-            can_enable_filter and self._source_codec_filter_check.isChecked()
-        )
-
-    def _on_source_codec_scan_completed(
+    def _on_preflight_scan_completed(
         self, request_id: int, worker: FFprobeWorker, results: List[object]
     ) -> None:
-        """Handle completion of source codec probing."""
+        """Handle completion of queue preflight analysis."""
         worker.deleteLater()
-        if request_id != self._codec_probe_request_id:
+        if request_id != self._preflight_request_id:
             return
 
-        if self._codec_probe_worker is worker:
-            self._codec_probe_worker = None
+        if self._preflight_worker is worker:
+            self._preflight_worker = None
 
         current_paths = set(self._file_list.get_file_paths())
         self._file_codecs = {}
@@ -1133,17 +1135,16 @@ class ConvertPage(QWidget):
                 if codec:
                     self._file_codecs[file_path] = self._normalize_source_codec(codec)
 
-        self._refresh_source_codec_combo()
         self._refresh_resolution_options()
-        self._update_source_filter_controls()
+        self._update_start_button_state()
 
-    def _on_source_codec_scan_error(
+    def _on_preflight_scan_error(
         self, request_id: int, file_path: str, error: str
     ) -> None:
-        """Log source codec scan failures without interrupting the UI."""
-        if request_id != self._codec_probe_request_id:
+        """Log metadata scan failures without interrupting the UI."""
+        if request_id != self._preflight_request_id:
             return
-        logger.warning("Codec probe failed for %s: %s", file_path, error)
+        logger.warning("Convert preflight probe failed for %s: %s", file_path, error)
 
     def _build_config(self) -> ConversionConfig:
         """Build a ConversionConfig from the current UI state."""
@@ -1175,6 +1176,7 @@ class ConvertPage(QWidget):
                 input_path,
                 output_dir=output_dir,
                 source_root=source_roots.get(input_path),
+                output_codec=self._get_selected_output_codec(),
             )
             for input_path in input_paths
         }
@@ -1195,10 +1197,67 @@ class ConvertPage(QWidget):
                 source_root=source_root,
             )
             preview.setdefault(folder, []).append(
-                build_conversion_output_name(input_path)
+                build_conversion_output_name(
+                    input_path, output_codec=self._get_selected_output_codec()
+                )
             )
 
         self._preview_tree.update_preview(preview)
+
+    def _update_start_button_state(self) -> None:
+        """Enable the start button only when the queue is fully prepared."""
+        can_start = (
+            self._file_list.count() > 0
+            and not self._file_list.is_busy()
+            and self._preflight_worker is None
+            and not self._cancel_btn.isVisible()
+        )
+        self._start_btn.setEnabled(can_start)
+        self._update_preflight_status()
+
+    def _update_preflight_status(self) -> None:
+        """Explain why the queue is or is not ready to start."""
+        if self._cancel_btn.isVisible():
+            self._preflight_status_label.setText("Conversion in progress.")
+            return
+
+        file_count = self._file_list.count()
+        if file_count == 0:
+            self._preflight_status_label.setText("Add files to prepare the queue.")
+            return
+
+        if self._file_list.is_busy():
+            self._preflight_status_label.setText(
+                f"Loading {file_count} file(s) into the queue..."
+            )
+            return
+
+        if self._preflight_worker is not None:
+            self._preflight_status_label.setText(
+                f"Analyzing {file_count} file(s) with ffprobe..."
+            )
+            return
+
+        if not self._source_codec_filter_check.isChecked():
+            self._preflight_status_label.setText(
+                f"Ready to convert {file_count} file(s)."
+            )
+            return
+
+        matching_count = sum(
+            1
+            for path in self._file_list.get_file_paths()
+            if self._matches_selected_output_format(path)
+        )
+        if matching_count == 0:
+            self._preflight_status_label.setText(
+                f"Ready to convert {file_count} file(s)."
+            )
+            return
+
+        self._preflight_status_label.setText(
+            f"Ready. {matching_count} file(s) already match {self._codec_combo.currentText()} and will be skipped."
+        )
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable the page."""
@@ -1209,10 +1268,11 @@ class ConvertPage(QWidget):
         self._preset_combo.setEnabled(enabled)
         if enabled:
             self._hw_combo.setEnabled(self._hw_combo.count() > 1)
-            self._update_source_filter_controls()
+            self._source_codec_filter_check.setEnabled(True)
+            self._update_start_button_state()
         else:
             self._hw_combo.setEnabled(False)
             self._source_codec_filter_check.setEnabled(False)
-            self._source_codec_combo.setEnabled(False)
+            self._start_btn.setEnabled(False)
         self._output_input.setEnabled(enabled)
         self._output_browse_btn.setEnabled(enabled)
