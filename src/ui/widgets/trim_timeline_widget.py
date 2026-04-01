@@ -97,6 +97,9 @@ class TrimTimelineWidget(QWidget):
             self._range_slider.setHandleLabelPosition(
                 QLabeledDoubleRangeSlider.LabelPosition.NoLabel
             )
+            self._range_slider.setEdgeLabelMode(
+                QLabeledDoubleRangeSlider.EdgeLabelMode.NoLabel
+            )
             layout.addWidget(self._range_slider)
         else:
             # Fallback: Two separate sliders for start and end
@@ -110,7 +113,7 @@ class TrimTimelineWidget(QWidget):
             start_layout.setContentsMargins(0, 0, 0, 0)
             start_layout.addWidget(QLabel("Start:"))
             self._start_slider = QSlider(Qt.Orientation.Horizontal)
-            self._start_slider.setRange(0, 1000)
+            self._start_slider.setRange(0, 100000)
             self._start_slider.setValue(0)
             start_layout.addWidget(self._start_slider)
             range_layout.addWidget(start_container)
@@ -121,8 +124,8 @@ class TrimTimelineWidget(QWidget):
             end_layout.setContentsMargins(0, 0, 0, 0)
             end_layout.addWidget(QLabel("End:"))
             self._end_slider = QSlider(Qt.Orientation.Horizontal)
-            self._end_slider.setRange(0, 1000)
-            self._end_slider.setValue(1000)
+            self._end_slider.setRange(0, 100000)
+            self._end_slider.setValue(100000)
             end_layout.addWidget(self._end_slider)
             range_layout.addWidget(end_container)
 
@@ -158,7 +161,7 @@ class TrimTimelineWidget(QWidget):
     def _on_fallback_start_changed(self, value: int) -> None:
         """Handle start slider change (fallback version)."""
         if self._duration > 0:
-            self._start_time = (value / 1000) * self._duration
+            self._start_time = (value / 100000) * self._duration
 
             # Ensure start doesn't exceed end
             end_value = self._end_slider.value()
@@ -172,7 +175,7 @@ class TrimTimelineWidget(QWidget):
     def _on_fallback_end_changed(self, value: int) -> None:
         """Handle end slider change (fallback version)."""
         if self._duration > 0:
-            self._end_time = (value / 1000) * self._duration
+            self._end_time = (value / 100000) * self._duration
 
             # Ensure end doesn't go below start
             start_value = self._start_slider.value()
@@ -224,7 +227,7 @@ class TrimTimelineWidget(QWidget):
             self._range_slider.setValue((0, duration))
         else:
             self._start_slider.setValue(0)
-            self._end_slider.setValue(1000)
+            self._end_slider.setValue(100000)
 
         self._update_labels()
 
@@ -243,8 +246,8 @@ class TrimTimelineWidget(QWidget):
             self._range_slider.setValue((self._start_time, self._end_time))
         else:
             if self._duration > 0:
-                start_val = int((self._start_time / self._duration) * 1000)
-                end_val = int((self._end_time / self._duration) * 1000)
+                start_val = int((self._start_time / self._duration) * 100000)
+                end_val = int((self._end_time / self._duration) * 100000)
                 self._start_slider.blockSignals(True)
                 self._end_slider.blockSignals(True)
                 self._start_slider.setValue(start_val)
@@ -301,7 +304,7 @@ class TrimTimelineWidget(QWidget):
             self._range_slider.setValue((0, 100))
         else:
             self._start_slider.setValue(0)
-            self._end_slider.setValue(1000)
+            self._end_slider.setValue(100000)
 
         self._update_labels()
 

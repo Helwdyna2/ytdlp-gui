@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 class _MpvRenderSurface(QOpenGLWidget):
     """OpenGL surface that libmpv renders into."""
 
+    render_ready = pyqtSignal(bool)
+
     def __init__(self, playback: PlaybackController, parent=None):
         super().__init__(parent)
         self._playback = playback
@@ -36,6 +38,7 @@ class _MpvRenderSurface(QOpenGLWidget):
 
     def initializeGL(self) -> None:
         self._render_ready = self._playback.attach_render_context()
+        self.render_ready.emit(self._render_ready)
         self.update()
 
     def paintGL(self) -> None:
@@ -66,6 +69,7 @@ class VideoPreviewWidget(QWidget):
     duration_loaded = pyqtSignal(float)
     video_loaded = pyqtSignal()
     playback_state_changed = pyqtSignal(bool)
+    _POSITION_SLIDER_STEPS = 100000
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -77,6 +81,7 @@ class VideoPreviewWidget(QWidget):
         self._position = 0.0
         self._is_playing = False
         self._video_path: Optional[str] = None
+        self._pending_video_path: Optional[str] = None
 
         self._setup_ui()
         self._connect_signals()
@@ -103,28 +108,30 @@ class VideoPreviewWidget(QWidget):
         controls_layout.setSpacing(8)
 
         self._play_btn = QPushButton()
-        self._play_btn.setFixedSize(32, 32)
+        self._play_btn.setObjectName("btnWire")
+        self._play_btn.setMinimumWidth(88)
+        self._play_btn.setMinimumHeight(34)
         self._play_btn.setToolTip("Play/Pause (Space)")
         controls_layout.addWidget(self._play_btn)
 
         self._frame_back_btn = QPushButton()
-        self._frame_back_btn.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_MediaSeekBackward)
-        )
-        self._frame_back_btn.setFixedSize(32, 32)
+        self._frame_back_btn.setObjectName("btnWire")
+        self._frame_back_btn.setText("Prev Frame")
+        self._frame_back_btn.setMinimumWidth(98)
+        self._frame_back_btn.setMinimumHeight(34)
         self._frame_back_btn.setToolTip("Previous frame (,)")
         controls_layout.addWidget(self._frame_back_btn)
 
         self._frame_forward_btn = QPushButton()
-        self._frame_forward_btn.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_MediaSeekForward)
-        )
-        self._frame_forward_btn.setFixedSize(32, 32)
+        self._frame_forward_btn.setObjectName("btnWire")
+        self._frame_forward_btn.setText("Next Frame")
+        self._frame_forward_btn.setMinimumWidth(98)
+        self._frame_forward_btn.setMinimumHeight(34)
         self._frame_forward_btn.setToolTip("Next frame (.)")
         controls_layout.addWidget(self._frame_forward_btn)
 
         self._position_slider = QSlider(Qt.Orientation.Horizontal)
-        self._position_slider.setRange(0, 1000)
+        self._position_slider.setRange(0, self._POSITION_SLIDER_STEPS)
         controls_layout.addWidget(self._position_slider, stretch=1)
 
         self._time_label = QLabel("00:00:00.000 / 00:00:00.000")
@@ -147,6 +154,7 @@ class VideoPreviewWidget(QWidget):
         self._playback.file_loaded.connect(self._on_file_loaded)
         self._playback.error_occurred.connect(self._on_playback_error)
         self._playback.availability_changed.connect(self._sync_availability_message)
+        self._render_surface.render_ready.connect(self._on_render_surface_ready)
 
     def _on_slider_pressed(self) -> None:
         if self._duration <= 0:
@@ -156,7 +164,7 @@ class VideoPreviewWidget(QWidget):
     def _on_slider_moved(self, value: int) -> None:
         if self._duration <= 0:
             return
-        position = (value / 1000.0) * self._duration
+        position = (value / self._POSITION_SLIDER_STEPS) * self._duration
         self._position = position
         self._update_time_label()
         self._scrub_controller.update_drag(position)
@@ -165,7 +173,7 @@ class VideoPreviewWidget(QWidget):
         if self._duration <= 0:
             return
         value = self._position_slider.value()
-        position = (value / 1000.0) * self._duration
+        position = (value / self._POSITION_SLIDER_STEPS) * self._duration
         self._position = position
         self._scrub_controller.update_drag(position)
         self._scrub_controller.end_drag()
@@ -174,7 +182,7 @@ class VideoPreviewWidget(QWidget):
     def _on_position_changed(self, position: float) -> None:
         self._position = max(0.0, position)
         if not self._position_slider.isSliderDown() and self._duration > 0:
-            slider_value = int((self._position / self._duration) * 1000)
+            slider_value = int((self._position / self._duration) * self._POSITION_SLIDER_STEPS)
             self._position_slider.blockSignals(True)
             self._position_slider.setValue(slider_value)
             self._position_slider.blockSignals(False)
@@ -200,6 +208,7 @@ class VideoPreviewWidget(QWidget):
         self.video_loaded.emit()
         if self._playback.is_available():
             self._availability_label.setText("libmpv render backend active.")
+            self._render_surface.update()
 
     def _on_playback_error(self, message: str) -> None:
         logger.error("Video preview error: %s", message)
@@ -218,12 +227,7 @@ class VideoPreviewWidget(QWidget):
         self._render_surface.hide()
 
     def _update_play_button(self) -> None:
-        icon = (
-            QStyle.StandardPixmap.SP_MediaPause
-            if self._is_playing
-            else QStyle.StandardPixmap.SP_MediaPlay
-        )
-        self._play_btn.setIcon(self.style().standardIcon(icon))
+        self._play_btn.setText("Pause" if self._is_playing else "Play")
 
     def _update_time_label(self) -> None:
         self._time_label.setText(
@@ -254,6 +258,7 @@ class VideoPreviewWidget(QWidget):
             return False
 
         self._video_path = path
+        self._pending_video_path = None
         self._position = 0.0
         self._duration = 0.0
         self._position_slider.blockSignals(True)
@@ -261,11 +266,18 @@ class VideoPreviewWidget(QWidget):
         self._position_slider.blockSignals(False)
         self._update_time_label()
         self._availability_label.setText(f"Loading {path}…")
+
+        if not self._render_surface.isValid():
+            self._pending_video_path = path
+            self._render_surface.update()
+            return True
+
         return self._playback.load_file(path)
 
     def unload_video(self) -> None:
         self._playback.unload()
         self._video_path = None
+        self._pending_video_path = None
         self._duration = 0.0
         self._position = 0.0
         self._is_playing = False
@@ -313,3 +325,17 @@ class VideoPreviewWidget(QWidget):
     def closeEvent(self, event) -> None:
         self.cleanup()
         super().closeEvent(event)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._pending_video_path and self._render_surface.isValid():
+            pending = self._pending_video_path
+            self._pending_video_path = None
+            self._playback.load_file(pending)
+
+    def _on_render_surface_ready(self, ready: bool) -> None:
+        if not ready or not self._pending_video_path:
+            return
+        pending = self._pending_video_path
+        self._pending_video_path = None
+        self._playback.load_file(pending)

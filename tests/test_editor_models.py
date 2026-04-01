@@ -54,3 +54,17 @@ def test_editor_session_enabled_segments_reflect_toggles():
     enabled = session.enabled_segments()
     assert len(enabled) == 1
     assert enabled[0].id == session.segments[1].id
+
+
+def test_editor_session_delete_segment_updates_selection():
+    session = EditorSession()
+    session.load_source("/tmp/example.mp4", 10.0)
+    session.split_at(3.0)
+    session.split_at(6.0)
+
+    removed = session.delete_segment(session.segments[1].id)
+
+    assert removed is not None
+    assert len(session.segments) == 2
+    assert session.selected_segment is not None
+    assert session.selected_segment.id == session.segments[1].id

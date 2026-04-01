@@ -33,6 +33,7 @@ class ScrubController(QObject):
         self._drag_active = False
         self._requested_position: Optional[float] = None
         self._last_sent_position: Optional[float] = None
+        self._last_exact_position: Optional[float] = None
         self._was_playing_before_drag = False
 
         self._dispatch_timer = QTimer(self)
@@ -90,5 +91,8 @@ class ScrubController(QObject):
     def _dispatch_exact_seek(self) -> None:
         if self._requested_position is None:
             return
+        if self._requested_position == self._last_exact_position:
+            return
         self._playback.seek(self._requested_position, precise=True)
         self._last_sent_position = self._requested_position
+        self._last_exact_position = self._requested_position

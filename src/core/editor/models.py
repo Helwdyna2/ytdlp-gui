@@ -185,6 +185,23 @@ class EditorSession:
         self.selected_segment_id = trailing.id
         return segment, trailing
 
+    def delete_segment(self, segment_id: Optional[str] = None) -> Optional[EditorSegment]:
+        """Remove the requested or selected segment from the session."""
+        segment = self.get_segment(segment_id) or self.selected_segment
+        if segment is None:
+            return None
+
+        index = self.segments.index(segment)
+        removed = self.segments.pop(index)
+
+        if not self.segments:
+            self.selected_segment_id = None
+            return removed
+
+        next_index = min(index, len(self.segments) - 1)
+        self.selected_segment_id = self.segments[next_index].id
+        return removed
+
     def toggle_segment_enabled(self, segment_id: Optional[str] = None) -> Optional[EditorSegment]:
         """Flip enabled state for the requested or selected segment."""
         segment = self.get_segment(segment_id) or self.selected_segment
