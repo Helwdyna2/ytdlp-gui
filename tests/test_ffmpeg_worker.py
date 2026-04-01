@@ -30,3 +30,31 @@ def test_ffmpeg_worker_skips_scale_filter_when_resolution_not_selected():
     command = worker._build_command("/usr/local/bin/ffmpeg")
 
     assert "-vf" not in command
+
+
+def test_ffmpeg_worker_builds_vp9_webm_command():
+    worker = FFmpegWorker(
+        "/tmp/input.mp4",
+        "/tmp/output.webm",
+        ConversionConfig(output_codec="vp9", output_resolution="1920x1080"),
+    )
+
+    command = worker._build_command("/usr/local/bin/ffmpeg")
+
+    assert "libvpx-vp9" in command
+    assert "libopus" in command
+    assert "-b:v" in command
+
+
+def test_ffmpeg_worker_builds_audio_only_command():
+    worker = FFmpegWorker(
+        "/tmp/input.mp4",
+        "/tmp/output.mp3",
+        ConversionConfig(output_codec="mp3", output_resolution="1920x1080"),
+    )
+
+    command = worker._build_command("/usr/local/bin/ffmpeg")
+
+    assert "-vn" in command
+    assert "libmp3lame" in command
+    assert "-c:v" not in command
