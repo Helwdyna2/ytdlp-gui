@@ -31,7 +31,10 @@ class Shell(QWidget):
         self.content_stack = QStackedWidget()
 
         # Right-side column: header + content + status bar
-        right_col = QVBoxLayout()
+        # Wrapped in a named QWidget so QSS can set a distinct background
+        right_widget = QWidget()
+        right_widget.setObjectName("contentArea")
+        right_col = QVBoxLayout(right_widget)
         right_col.setContentsMargins(0, 0, 0, 0)
         right_col.setSpacing(0)
         right_col.addWidget(self.header_bar)
@@ -43,7 +46,7 @@ class Shell(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.sidebar)
-        layout.addLayout(right_col)
+        layout.addWidget(right_widget)
 
         # Wiring
         self.sidebar.tool_selected.connect(self._on_tool_selected)

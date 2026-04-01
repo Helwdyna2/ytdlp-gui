@@ -73,6 +73,7 @@ class SettingsPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.viewport().setAutoFillBackground(False)
 
         container = QWidget()
         main_layout = QVBoxLayout(container)

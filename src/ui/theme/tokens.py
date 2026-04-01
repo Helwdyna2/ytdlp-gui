@@ -114,10 +114,10 @@ DARK_TOKENS: Dict[str, str] = {
     "input-well": "#000000",
     # Borders
     "border-hard": "rgba(72, 71, 74, 0.15)",
-    "border-soft": "rgba(72, 71, 74, 0.10)",
+    "border-soft": "rgba(72, 71, 74, 0.08)",
     "border-focus": "rgba(197, 196, 255, 0.4)",
     "border-bright": "rgba(72, 71, 74, 0.25)",
-    "ghost-border": "rgba(72, 71, 74, 0.15)",
+    "ghost-border": "rgba(72, 71, 74, 0.10)",
     # Colors — primary violet, secondary teal
     "primary": "#c5c4ff",
     "primary-container": "#9c9bd3",
@@ -127,7 +127,7 @@ DARK_TOKENS: Dict[str, str] = {
     "on-surface": "#f6f3f5",
     "on-surface-variant": "#acaaad",
     "on-primary-container": "#c5c4ff",
-    "outline-variant": "rgba(72, 71, 74, 0.15)",
+    "outline-variant": "rgba(72, 71, 74, 0.10)",
     # Data colors (backward compat mapped to new palette)
     "cyan": "#c5c4ff",
     "cyan-dim": "#9c9bd3",

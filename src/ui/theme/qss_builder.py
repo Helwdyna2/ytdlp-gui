@@ -30,12 +30,35 @@ def build_qss(
    Digital Obsidian QSS — auto-generated from theme tokens
    =================================================================== */
 
-/* ----- 1. Global base (QWidget) ----- */
+/* ----- 1. Global base ----- */
+/* NOTE: No background on QWidget — that kills tonal layering by painting
+   bg-void on every child widget.  Backgrounds are set on specific named
+   containers below so the surface hierarchy (void → surface → panel → cell)
+   is visible. */
 QWidget {{
-    background: {t["bg-void"]};
     color: {t["text-primary"]};
     font-family: {font_body};
     font-size: 12px;
+}}
+
+/* Shell-level surfaces */
+QMainWindow {{
+    background: {t["bg-void"]};
+}}
+
+QDialog {{
+    background: {t["bg-void"]};
+    color: {t["text-primary"]};
+}}
+
+/* Content area — sits one tonal step above void */
+QWidget#contentArea {{
+    background: {t["surface-container-low"]};
+}}
+
+/* Stacked widget inside content area — transparent so parent bg shows */
+QStackedWidget {{
+    background: transparent;
 }}
 
 /* ----- 2. QPushButton default (secondary / ghost style) ----- */
@@ -200,6 +223,7 @@ QComboBox:focus {{
 /* ----- 7. Input wells — QLineEdit, QTextEdit, QSpinBox, QComboBox ----- */
 QLineEdit,
 QTextEdit,
+QPlainTextEdit,
 QSpinBox,
 QDoubleSpinBox,
 QComboBox {{
@@ -417,6 +441,11 @@ QWidget#sidebar {{
     border: none;
 }}
 
+/* Page widgets — transparent so contentArea bg shows through */
+QWidget#pageRoot {{
+    background: transparent;
+}}
+
 /* ----- 16. QPushButton#sidebarItem — tonal active, no left indicator ----- */
 QPushButton#sidebarItem {{
     background: transparent;
@@ -466,26 +495,30 @@ QLabel#pageDescription {{
 
 /* ----- 20. QWidget#logFeed ----- */
 QWidget#logFeed {{
-    background: {t["bg-surface"]};
-    border: none;
-    border-radius: {t["r-l"]};
+    background: {t["bg-panel"]};
+    border: 1px solid {t["ghost-border"]};
+    border-radius: {t["r-xl"]};
 }}
 
 /* ----- 21. QWidget#activityDrawer ----- */
 QWidget#activityDrawer {{
-    background: {t["bg-surface"]};
-    border: none;
-    border-radius: {t["r-l"]};
+    background: {t["bg-panel"]};
+    border: 1px solid {t["ghost-border"]};
+    border-radius: {t["r-xl"]};
 }}
 
-/* ----- 22. QWidget#dpanel (DataPanel) — tonal, rounded, no border ----- */
+/* ----- 22. QWidget#dpanel (DataPanel) — tonal card with ghost border ----- */
 QWidget#dpanel {{
     background: {t["bg-panel"]};
-    border: none;
-    border-radius: {t["r-l"]};
+    border: 1px solid {t["ghost-border"]};
+    border-radius: {t["r-xl"]};
 }}
 
 QWidget#dpanelHeader {{
+    background: transparent;
+}}
+
+QWidget#dpanelBody {{
     background: transparent;
 }}
 
@@ -557,11 +590,7 @@ QMenu::item:selected {{
     color: {t["text-bright"]};
 }}
 
-/* ----- 26. QDialog ----- */
-QDialog {{
-    background: {t["bg-void"]};
-    color: {t["text-primary"]};
-}}
+/* ----- 26. QDialog — (handled in global section above) ----- */
 
 /* ----- 27. QSplitter::handle ----- */
 QSplitter::handle {{
@@ -619,10 +648,14 @@ QLabel[dataColor="muted"] {{
     color: {t["text-muted"]};
 }}
 
-/* ----- 30. QScrollArea ----- */
+/* ----- 30. QScrollArea & viewport ----- */
 QScrollArea {{
     background: transparent;
     border: none;
+}}
+
+QScrollArea > QAbstractScrollArea {{
+    background: transparent;
 }}
 
 /* ----- 31. QStatusBar ----- */
@@ -662,10 +695,10 @@ QTextEdit#monoText {{
 
 /* ----- 34. Stat cards & status dots ----- */
 QWidget#statCard {{
-    background: {t["bg-panel"]};
+    background: {t["surface-container-highest"]};
     border: 1px solid {t["ghost-border"]};
-    border-radius: {t["r-l"]};
-    padding: 8px 12px;
+    border-radius: {t["r-xl"]};
+    padding: 8px 16px;
 }}
 
 QLabel#statValue {{
@@ -724,7 +757,7 @@ QLabel#statusTag[color="red"] {{
 /* ----- 36. Header bar ----- */
 QWidget#headerBar {{
     background: {t["bg-void"]};
-    border: none;
+    border-bottom: 1px solid {t["ghost-border"]};
     min-height: 48px;
     max-height: 48px;
 }}
@@ -758,8 +791,8 @@ QPushButton#headerTab:hover:!checked {{
 
 /* ----- 37. Status bar ----- */
 QWidget#statusBar {{
-    background: {t["bg-surface"]};
-    border: none;
+    background: {t["bg-void"]};
+    border-top: 1px solid {t["ghost-border"]};
     min-height: 28px;
     max-height: 32px;
 }}
@@ -832,8 +865,8 @@ QPushButton#collapsibleToggle {{
 /* ----- 41. ConfigBar ----- */
 QWidget#configBar {{
     background: {t["bg-panel"]};
-    border: none;
-    border-radius: {t["r-l"]};
+    border: 1px solid {t["ghost-border"]};
+    border-radius: {t["r-xl"]};
     padding: 4px 8px;
 }}
 
