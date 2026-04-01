@@ -132,7 +132,40 @@ class FFmpegWorker(QThread):
         Returns:
             Command as list of strings
         """
-        # Determine encoder
+        cmd = [
+            ffmpeg_path,
+            "-y",  # Overwrite output
+            "-i",
+            self._input_path,
+        ]
+
+        if self._config.output_codec in {"mp3", "aac", "flac"}:
+            cmd.extend(["-vn"])
+            cmd.extend(self._build_audio_only_args())
+        else:
+            encoder = self._resolve_video_encoder()
+            cmd.extend(["-c:v", encoder])
+
+            scale_filter = self._build_scale_filter()
+            if scale_filter:
+                cmd.extend(["-vf", scale_filter])
+
+            cmd.extend(self._build_video_quality_args(encoder))
+            cmd.extend(self._build_mux_audio_args())
+
+        # Progress reporting
+        cmd.extend(["-progress", "pipe:1"])
+
+        # Output file
+        cmd.append(self._output_path)
+
+        return cmd
+
+    def _resolve_video_encoder(self) -> str:
+        """Resolve the requested video encoder for the selected output format."""
+        if self._config.output_codec == "vp9":
+            return "libvpx-vp9"
+
         hw_encoder = None
         if self._config.use_hardware_accel:
             encoders = get_cached_hardware_encoders()
@@ -144,59 +177,60 @@ class FFmpegWorker(QThread):
                     hw_encoder = enc
                     break
             if not hw_encoder and encoders:
-                hw_encoder = encoders[0]  # Use first available
+                hw_encoder = encoders[0]
 
-        encoder = get_encoder_for_codec(
+        return get_encoder_for_codec(
             hw_encoder, self._config.output_codec, self._config.use_hardware_accel
         )
 
-        cmd = [
-            ffmpeg_path,
-            "-y",  # Overwrite output
-            "-i",
-            self._input_path,
-            "-c:v",
-            encoder,
-        ]
+    def _build_video_quality_args(self, encoder: str) -> list[str]:
+        """Build codec-specific quality arguments for video outputs."""
+        if encoder == "libvpx-vp9":
+            return ["-b:v", "0", "-crf", str(self._config.crf_value)]
 
-        scale_filter = self._build_scale_filter()
-        if scale_filter:
-            cmd.extend(["-vf", scale_filter])
-
-        # Add quality settings based on encoder type
         if "nvenc" in encoder:
-            # NVIDIA NVENC uses -cq for constant quality
-            cmd.extend(["-cq", str(self._config.crf_value)])
-            cmd.extend(["-preset", self._nvenc_preset(self._config.preset)])
-        elif "amf" in encoder:
-            # AMD AMF uses -qp_i, -qp_p
-            cmd.extend(["-qp_i", str(self._config.crf_value)])
-            cmd.extend(["-qp_p", str(self._config.crf_value)])
-        elif "qsv" in encoder:
-            # Intel QSV uses -global_quality
-            cmd.extend(["-global_quality", str(self._config.crf_value)])
-            cmd.extend(["-preset", self._qsv_preset(self._config.preset)])
-        elif "videotoolbox" in encoder:
-            # macOS VideoToolbox
-            # VT doesn't support CRF directly, use average bitrate mode
-            # Estimate bitrate from CRF (rough approximation)
+            return [
+                "-cq",
+                str(self._config.crf_value),
+                "-preset",
+                self._nvenc_preset(self._config.preset),
+            ]
+
+        if "amf" in encoder:
+            return [
+                "-qp_i",
+                str(self._config.crf_value),
+                "-qp_p",
+                str(self._config.crf_value),
+            ]
+
+        if "qsv" in encoder:
+            return [
+                "-global_quality",
+                str(self._config.crf_value),
+                "-preset",
+                self._qsv_preset(self._config.preset),
+            ]
+
+        if "videotoolbox" in encoder:
             estimated_bitrate = self._estimate_bitrate_from_crf(self._config.crf_value)
-            cmd.extend(["-b:v", f"{estimated_bitrate}k"])
-        else:
-            # Software encoders (libx264, libx265)
-            cmd.extend(["-crf", str(self._config.crf_value)])
-            cmd.extend(["-preset", self._config.preset])
+            return ["-b:v", f"{estimated_bitrate}k"]
 
-        # Audio codec - copy or convert
-        cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+        return ["-crf", str(self._config.crf_value), "-preset", self._config.preset]
 
-        # Progress reporting
-        cmd.extend(["-progress", "pipe:1"])
+    def _build_mux_audio_args(self) -> list[str]:
+        """Build audio arguments for video container outputs."""
+        if self._config.output_codec == "vp9":
+            return ["-c:a", "libopus", "-b:a", "192k"]
+        return ["-c:a", "aac", "-b:a", "192k"]
 
-        # Output file
-        cmd.append(self._output_path)
-
-        return cmd
+    def _build_audio_only_args(self) -> list[str]:
+        """Build audio codec arguments for audio-only outputs."""
+        if self._config.output_codec == "mp3":
+            return ["-c:a", "libmp3lame", "-b:a", "192k"]
+        if self._config.output_codec == "flac":
+            return ["-c:a", "flac"]
+        return ["-c:a", "aac", "-b:a", "192k"]
 
     def _build_scale_filter(self) -> Optional[str]:
         """Build a scale/pad filter for the selected output resolution."""

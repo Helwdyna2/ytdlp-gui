@@ -1,5 +1,6 @@
 """Tests for ConvertPage."""
 
+import os
 import sys
 
 import pytest
@@ -44,8 +45,7 @@ def fake_config_service(monkeypatch, convert_page_module):
                 "convert.output_dir": "",
                 "convert.use_hardware_accel": False,
                 "convert.hardware_encoder": "",
-                "convert.source_codec_filter_enabled": False,
-                "convert.source_codec_filter": "",
+                "convert.skip_matching_output_enabled": False,
             }
             self.values.update(type(self).next_values)
 
@@ -125,6 +125,32 @@ def fake_ffprobe_worker(monkeypatch, convert_page_module):
     FakeFFprobeWorker.auto_complete_queue = []
     FakeFFprobeWorker.instances = []
     return FakeFFprobeWorker
+
+
+@pytest.fixture
+def fake_folder_scan_worker(monkeypatch, convert_page_module):
+    class FakeFolderScanWorker(QObject):
+        progress = pyqtSignal(int, str)
+        completed = pyqtSignal(list)
+        error = pyqtSignal(str)
+
+        instances = []
+
+        def __init__(self, folder, recursive=True, parent=None):
+            super().__init__(parent)
+            self.folder = folder
+            self.recursive = recursive
+            self.started = False
+            type(self).instances.append(self)
+
+        def start(self):
+            self.started = True
+
+    monkeypatch.setattr(
+        convert_page_module, "FolderScanWorker", FakeFolderScanWorker
+    )
+    FakeFolderScanWorker.instances = []
+    return FakeFolderScanWorker
 
 
 @pytest.fixture
@@ -313,7 +339,7 @@ def test_convert_page_hw_combo_disabled_for_unsupported_target(
 
     assert _combo_items(page._hw_combo) == ["Not available for this format"]
     assert not page._hw_combo.isEnabled()
-    assert not page._source_codec_filter_check.isEnabled()
+    assert page._source_codec_filter_check.isEnabled()
     assert "only available for H.264 and H.265" in page._hw_status_label.text()
 
 
@@ -358,23 +384,59 @@ def test_convert_page_ignores_saved_unsupported_hw_selection(
     assert _combo_items(page._hw_combo) == ["None", "VideoToolbox"]
 
 
-def test_convert_page_populates_unique_source_codecs(
+def test_convert_page_starts_disabled_until_preflight_completes(
     qapp, monkeypatch, fake_config_service, fake_ffprobe_worker, convert_page_module
 ):
     from src.ui.pages.convert_page import ConvertPage
 
     monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+    fake_ffprobe_worker.auto_complete = False
     fake_ffprobe_worker.results_by_path = {
         "/tmp/a.mp4": "h264",
-        "/tmp/b.webm": "vp9",
-        "/tmp/c.mp4": "h264",
     }
 
     page = ConvertPage()
-    page._file_list._add_paths(list(fake_ffprobe_worker.results_by_path.keys()))
+    page._file_list._add_paths(["/tmp/a.mp4"])
+
+    assert page._start_btn.isEnabled() is False
+
+    worker = fake_ffprobe_worker.instances[-1]
+    fake_ffprobe_worker.auto_complete = True
+    worker.start()
     qapp.processEvents()
 
-    assert _combo_items(page._source_codec_combo) == ["H.264", "VP9"]
+    assert page._start_btn.isEnabled() is True
+
+
+def test_file_list_widget_emits_loading_state_when_folder_scan_starts(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_folder_scan_worker,
+    convert_page_module,
+):
+    from src.ui.pages.convert_page import FileListWidget
+
+    states = []
+
+    monkeypatch.setattr(
+        convert_page_module.QFileDialog,
+        "getExistingDirectory",
+        lambda *args, **kwargs: "/tmp/library",
+    )
+    monkeypatch.setattr(
+        convert_page_module, "update_dialog_last_dir", lambda *args, **kwargs: None
+    )
+
+    widget = FileListWidget()
+    widget.loading_state_changed.connect(states.append)
+
+    widget._on_add_folder()
+    qapp.processEvents()
+
+    assert states == [True]
+    assert fake_folder_scan_worker.instances[-1].started is True
 
 
 def test_convert_page_filter_off_queues_all_files(
@@ -402,7 +464,35 @@ def test_convert_page_filter_off_queues_all_files(
     assert manager.added_files == ["/tmp/a.mp4", "/tmp/b.webm"]
 
 
-def test_convert_page_filter_on_queues_only_matching_files(
+def test_convert_page_skip_status_refreshes_for_toggle_and_resolution(
+    qapp, monkeypatch, fake_config_service, fake_ffprobe_worker, convert_page_module
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/a.mp4": {"codec": "h264", "width": 1920, "height": 1080},
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/a.mp4"])
+    qapp.processEvents()
+
+    assert page._preflight_status_label.text() == "Ready to convert 1 file(s)."
+
+    page._source_codec_filter_check.setChecked(True)
+    qapp.processEvents()
+
+    assert "will be skipped" in page._preflight_status_label.text()
+
+    resolution_index = page._resolution_combo.findText("1280x720")
+    page._resolution_combo.setCurrentIndex(resolution_index)
+    qapp.processEvents()
+
+    assert page._preflight_status_label.text() == "Ready to convert 1 file(s)."
+
+
+def test_convert_page_skip_matching_output_queues_only_non_matching_files(
     qapp,
     monkeypatch,
     fake_config_service,
@@ -429,7 +519,6 @@ def test_convert_page_filter_on_queues_only_matching_files(
     page._file_list._add_paths(list(fake_ffprobe_worker.results_by_path.keys()))
     qapp.processEvents()
     page._source_codec_filter_check.setChecked(True)
-    page._source_codec_combo.setCurrentIndex(page._source_codec_combo.findData("vp9"))
 
     page._on_start()
 
@@ -438,7 +527,7 @@ def test_convert_page_filter_on_queues_only_matching_files(
     assert any("Skipping 1 file(s)" in message for message in messages)
 
 
-def test_convert_page_filter_on_with_no_matches_shows_message(
+def test_convert_page_skip_matching_output_with_all_matches_shows_message(
     qapp,
     monkeypatch,
     fake_config_service,
@@ -464,14 +553,14 @@ def test_convert_page_filter_on_with_no_matches_shows_message(
     page._file_list._add_paths(["/tmp/a.mp4"])
     qapp.processEvents()
     page._source_codec_filter_check.setChecked(True)
-    page._source_codec_combo.setCurrentIndex(0)
-    page._source_codec_combo.setItemData(0, "vp9")
-    page._source_codec_combo.setItemText(0, "VP9")
 
     page._on_start()
 
     assert fake_conversion_manager.instances == []
-    assert ("No Matching Files", 'No files match the selected source codec "VP9".') in messages
+    assert (
+        "Nothing To Convert",
+        'All selected files already match "mp4 / H.264".',
+    ) in messages
 
 
 def test_convert_page_file_changes_restart_codec_scan(
@@ -495,7 +584,7 @@ def test_convert_page_file_changes_restart_codec_scan(
     qapp.processEvents()
 
     assert first_worker.cancelled is True
-    assert _combo_items(page._source_codec_combo) == ["H.264", "VP9"]
+    assert page._start_btn.isEnabled() is True
 
 
 def test_convert_page_build_config_respects_hw_selection(
@@ -627,6 +716,27 @@ def test_convert_page_passes_nested_output_paths_for_folder_sources(
 
     manager = fake_conversion_manager.instances[-1]
     assert manager.added_output_paths == {
-        "/tmp/library/Action/movie1.mp4": "/tmp/output/Action/movie1_converted.mp4",
-        "/tmp/library/Drama/Sub/movie2.mp4": "/tmp/output/Drama/Sub/movie2_converted.mp4",
+        "/tmp/library/Action/movie1.mp4": os.path.normpath(
+            "/tmp/output/Action/movie1_converted.mp4"
+        ),
+        "/tmp/library/Drama/Sub/movie2.mp4": os.path.normpath(
+            "/tmp/output/Drama/Sub/movie2_converted.mp4"
+        ),
     }
+
+
+def test_convert_page_preview_updates_output_extension(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/input.mp4"])
+    qapp.processEvents()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("vp9"))
+
+    root_item = page._preview_tree.invisibleRootItem()
+    child_item = root_item.child(0) if root_item.childCount() else None
+
+    assert child_item is not None
+    assert child_item.text(0).endswith("input_converted.webm")

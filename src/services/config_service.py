@@ -72,6 +72,7 @@ DEFAULT_CONFIG = {
         "preset": "medium",
         "use_hardware_accel": False,
         "hardware_encoder": "",
+        "skip_matching_output_enabled": False,
         "source_codec_filter_enabled": False,
         "source_codec_filter": "",
     },

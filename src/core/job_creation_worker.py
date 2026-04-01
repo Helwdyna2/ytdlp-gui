@@ -127,7 +127,9 @@ class JobCreationWorker(QThread):
         # Generate output filename
         input_file = Path(input_path)
         output_path = self._output_paths.get(input_path) or build_conversion_output_path(
-            input_path, output_dir=self._output_dir
+            input_path,
+            output_dir=self._output_dir,
+            output_codec=self._config.output_codec,
         )
 
         # Get input file size (blocking I/O - that's why we're in a thread)
