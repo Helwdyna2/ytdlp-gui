@@ -19,11 +19,14 @@ Tests live in `tests/` and follow the source layout with `test_*.py` files. Desi
 The LosslessCut-style editor work lives inside the existing Trim tool rather than a separate app. Keep new editor-specific logic under `src/core/editor/` and let `src/ui/pages/trim_page.py` orchestrate the workflow.
 
 - Preview playback uses libmpv render API through `QOpenGLWidget` in `src/ui/widgets/video_preview_widget.py`. Do not reintroduce mpv `wid`/native-child embedding as the primary path.
+- The Trim timeline is now a custom-painted widget in `src/ui/widgets/trim_timeline_widget.py` that renders segment blocks, a playhead, and draggable selected-segment handles. Extend that widget for timeline UX changes instead of reverting to the older `superqt` range-slider pattern.
 - If you touch playback bootstrap, preserve the `QSurfaceFormat.setDefaultFormat(...)` setup in `src/main.py` before `QApplication` creation. This is required for the embedded OpenGL render path, especially on macOS.
 - Headless/offscreen tests intentionally skip libmpv initialization in `PlaybackController`. That keeps `pytest` stable under `QT_QPA_PLATFORM=offscreen` while the real app still uses libmpv on desktop runs.
+- Decoder-status strings from libmpv property-change events must be decoded from the observed string pointer payload, not from the event data pointer directly, or the UI will show garbled decoder text.
 - Editor export/persistence/diagnostics live in `src/core/editor/export_*`, `project_store.py`, `quick_session_store.py`, and `diagnostics.py`. Reuse those instead of extending the legacy one-range trim worker flow for editor features.
 - Quick-session autosave writes `data/trim_quick_session.json`. Saved projects are JSON files chosen by the user, typically `*.cutproj.json`.
 - Keyframe awareness currently comes from ffprobe via `src/core/editor/keyframe_probe_worker.py`. If you add copy-safety warnings or boundary logic, build on that data instead of inferring from playback alone.
+- User-editable Trim bindings and the default scrub-step are configured in Settings under the `Trim & Shortcuts` section and persisted via `trim.shortcuts.*` plus `trim.playback.scrub_step_seconds`.
 
 ## Build, Test, and Development Commands
 - `python -m venv .venv && source .venv/bin/activate`: create and activate a local virtualenv
@@ -43,7 +46,7 @@ Use `pytest` and `pytest-qt` for GUI coverage. Name new tests `test_<feature>.py
 
 For the Trim editor stack, prefer this focused validation loop while iterating:
 
-- `QT_QPA_PLATFORM=offscreen PYTHONPATH=. .venv/bin/pytest tests/test_editor_models.py tests/test_scrub_controller.py tests/test_export_planner.py tests/test_project_store.py tests/test_trim_page.py -q`
+- `QT_QPA_PLATFORM=offscreen PYTHONPATH=. .venv/bin/pytest tests/test_editor_models.py tests/test_scrub_controller.py tests/test_export_planner.py tests/test_project_store.py tests/test_trim_page.py tests/test_trim_timeline_widget.py tests/test_video_preview_widget.py -q`
 - `python -m py_compile` on touched editor/playback/trim modules when making render-path or signal-flow changes
 
 Passing headless tests is necessary but not sufficient for the player. Live desktop validation in `python run.py` is still required before calling playback/export behavior production-ready.
