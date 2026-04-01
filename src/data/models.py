@@ -308,6 +308,7 @@ class ConversionConfig:
     preset: str = "medium"  # ultrafast to veryslow
     use_hardware_accel: bool = False
     hardware_encoder: Optional[str] = None  # nvenc, amf, qsv
+    output_resolution: Optional[str] = None  # e.g. "1920x1080"
     output_dir: Optional[str] = None
 
 
@@ -524,4 +525,3 @@ class TrimJob:
             if row["completed_at"]
             else None,
         )
-

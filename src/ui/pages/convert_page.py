@@ -72,6 +72,29 @@ SOURCE_CODEC_DISPLAY_NAMES = {
 TARGET_CODECS_WITH_SOURCE_FILTER = {"h264", "hevc"}
 FILE_PATH_ROLE = int(Qt.ItemDataRole.UserRole)
 SOURCE_ROOT_ROLE = FILE_PATH_ROLE + 1
+RESOLUTION_DATA_ROLE = SOURCE_ROOT_ROLE + 1
+
+SAME_AS_SOURCE_RESOLUTION = "source"
+HORIZONTAL_RESOLUTIONS = [
+    "3840x2160",
+    "2560x1440",
+    "1920x1080",
+    "1280x720",
+]
+VERTICAL_RESOLUTIONS = [
+    "2160x3840",
+    "1440x2560",
+    "1080x1920",
+    "720x1280",
+]
+ORIENTATION_RESOLUTION_OPTIONS = {
+    "horizontal": HORIZONTAL_RESOLUTIONS,
+    "vertical": VERTICAL_RESOLUTIONS,
+}
+OPPOSITE_ORIENTATION = {
+    "horizontal": "vertical",
+    "vertical": "horizontal",
+}
 
 
 class FileListWidget(QWidget):
@@ -293,6 +316,7 @@ class ConvertPage(QWidget):
         self._config_service = ConfigService()
         self._hardware_encoders: List[HardwareEncoder] = []
         self._file_codecs: Dict[str, str] = {}
+        self._file_metadata: Dict[str, object] = {}
         self._loading_settings = False
 
         self._setup_ui()
@@ -376,6 +400,15 @@ class ConvertPage(QWidget):
             self._codec_combo.addItem(label, codec)
         sl.addWidget(self._codec_combo)
 
+        sl.addWidget(QLabel("Output Resolution"))
+        self._resolution_combo = QComboBox()
+        self._resolution_combo.setToolTip(
+            "Automatically shows presets for the detected orientation, with"
+            " opposite-orientation overrides below the divider."
+        )
+        self._refresh_resolution_options()
+        sl.addWidget(self._resolution_combo)
+
         # Quality
         sl.addWidget(QLabel("Quality"))
         quality_row = QHBoxLayout()
@@ -452,6 +485,7 @@ class ConvertPage(QWidget):
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._crf_slider.valueChanged.connect(self._on_crf_changed)
         self._codec_combo.currentIndexChanged.connect(self._on_output_codec_changed)
+        self._resolution_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._preset_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._hw_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._source_codec_filter_check.toggled.connect(
@@ -476,6 +510,11 @@ class ConvertPage(QWidget):
                 self._config_service.get("convert.codec", "h264")
             )
             self._set_selected_output_codec(codec)
+
+            resolution = self._normalize_resolution_value(
+                self._config_service.get("convert.resolution", SAME_AS_SOURCE_RESOLUTION)
+            )
+            self._set_selected_resolution(resolution)
 
             crf = self._config_service.get("convert.crf", DEFAULT_CRF)
             self._crf_slider.setValue(crf)
@@ -509,6 +548,7 @@ class ConvertPage(QWidget):
         source_codec = self._get_selected_source_codec()
 
         self._config_service.set("convert.codec", codec)
+        self._config_service.set("convert.resolution", self._get_selected_resolution())
         self._config_service.set("convert.crf", self._crf_slider.value())
         self._config_service.set("convert.preset", self._preset_combo.currentText())
         self._config_service.set(
@@ -805,11 +845,109 @@ class ConvertPage(QWidget):
         """Get the selected output codec."""
         return self._codec_combo.currentData() or "h264"
 
+    def _normalize_resolution_value(self, value: Optional[str]) -> str:
+        """Normalize stored output resolution values."""
+        normalized = (value or "").strip().lower()
+        if normalized == SAME_AS_SOURCE_RESOLUTION:
+            return SAME_AS_SOURCE_RESOLUTION
+
+        combined = HORIZONTAL_RESOLUTIONS + VERTICAL_RESOLUTIONS
+        return normalized if normalized in combined else SAME_AS_SOURCE_RESOLUTION
+
     def _set_selected_output_codec(self, codec: str) -> None:
         """Set the selected output codec."""
         normalized = self._normalize_output_codec(codec)
         index = self._codec_combo.findData(normalized)
         self._codec_combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _get_selected_resolution(self) -> str:
+        """Get the selected output resolution value."""
+        resolution = self._resolution_combo.currentData(RESOLUTION_DATA_ROLE)
+        return self._normalize_resolution_value(resolution)
+
+    def _set_selected_resolution(self, resolution: str) -> None:
+        """Set the selected output resolution."""
+        normalized = self._normalize_resolution_value(resolution)
+        index = self._find_resolution_index(normalized)
+        self._resolution_combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _find_resolution_index(self, resolution: str) -> int:
+        """Find the first combo index with the given resolution payload."""
+        for index in range(self._resolution_combo.count()):
+            if (
+                self._resolution_combo.itemData(index, RESOLUTION_DATA_ROLE)
+                == resolution
+            ):
+                return index
+        return -1
+
+    def _get_auto_orientation(self) -> str:
+        """Get the detected orientation for the current file list."""
+        orientations: List[str] = []
+        for path in self._file_list.get_file_paths():
+            metadata = self._file_metadata.get(path)
+            orientation = getattr(metadata, "orientation", "")
+            if orientation in {"horizontal", "vertical"}:
+                orientations.append(orientation)
+
+        if not orientations:
+            return "horizontal"
+
+        horizontal_count = orientations.count("horizontal")
+        vertical_count = orientations.count("vertical")
+        if horizontal_count == vertical_count:
+            return orientations[0]
+        return "horizontal" if horizontal_count > vertical_count else "vertical"
+
+    def _format_resolution_label(
+        self, resolution: str, orientation: str, *, is_override: bool
+    ) -> str:
+        """Build a user-facing resolution option label."""
+        if not is_override:
+            return resolution
+        return f"{resolution} ({orientation.title()} override)"
+
+    def _refresh_resolution_options(self) -> None:
+        """Refresh resolution options from the detected file orientation."""
+        selected_resolution = self._get_selected_resolution()
+        auto_orientation = self._get_auto_orientation()
+        override_orientation = OPPOSITE_ORIENTATION[auto_orientation]
+
+        self._resolution_combo.blockSignals(True)
+        self._resolution_combo.clear()
+        self._resolution_combo.addItem("Same as source")
+        self._resolution_combo.setItemData(
+            0, SAME_AS_SOURCE_RESOLUTION, RESOLUTION_DATA_ROLE
+        )
+
+        for resolution in ORIENTATION_RESOLUTION_OPTIONS[auto_orientation]:
+            self._resolution_combo.addItem(
+                self._format_resolution_label(
+                    resolution, auto_orientation, is_override=False
+                )
+            )
+            self._resolution_combo.setItemData(
+                self._resolution_combo.count() - 1,
+                resolution,
+                RESOLUTION_DATA_ROLE,
+            )
+
+        self._resolution_combo.insertSeparator(self._resolution_combo.count())
+
+        for resolution in ORIENTATION_RESOLUTION_OPTIONS[override_orientation]:
+            self._resolution_combo.addItem(
+                self._format_resolution_label(
+                    resolution, override_orientation, is_override=True
+                )
+            )
+            self._resolution_combo.setItemData(
+                self._resolution_combo.count() - 1,
+                resolution,
+                RESOLUTION_DATA_ROLE,
+            )
+
+        self._set_selected_resolution(selected_resolution)
+        self._resolution_combo.blockSignals(False)
 
     def _get_selected_source_codec(self) -> Optional[str]:
         """Get the selected source codec filter."""
@@ -891,9 +1029,15 @@ class ConvertPage(QWidget):
         self._file_codecs = {
             path: codec for path, codec in self._file_codecs.items() if path in current_paths
         }
+        self._file_metadata = {
+            path: metadata
+            for path, metadata in self._file_metadata.items()
+            if path in current_paths
+        }
 
         if not current_paths:
             self._refresh_source_codec_combo()
+            self._refresh_resolution_options()
             self._update_source_filter_controls()
             return
 
@@ -980,13 +1124,17 @@ class ConvertPage(QWidget):
 
         current_paths = set(self._file_list.get_file_paths())
         self._file_codecs = {}
+        self._file_metadata = {}
         for metadata in results:
             file_path = getattr(metadata, "file_path", None)
             codec = getattr(metadata, "codec", "")
-            if file_path and file_path in current_paths and codec:
-                self._file_codecs[file_path] = self._normalize_source_codec(codec)
+            if file_path and file_path in current_paths:
+                self._file_metadata[file_path] = metadata
+                if codec:
+                    self._file_codecs[file_path] = self._normalize_source_codec(codec)
 
         self._refresh_source_codec_combo()
+        self._refresh_resolution_options()
         self._update_source_filter_controls()
 
     def _on_source_codec_scan_error(
@@ -1005,6 +1153,11 @@ class ConvertPage(QWidget):
 
         return ConversionConfig(
             output_codec=codec,
+            output_resolution=(
+                None
+                if self._get_selected_resolution() == SAME_AS_SOURCE_RESOLUTION
+                else self._get_selected_resolution()
+            ),
             crf_value=self._crf_slider.value(),
             preset=self._preset_combo.currentText(),
             use_hardware_accel=use_hw,
@@ -1051,6 +1204,7 @@ class ConvertPage(QWidget):
         """Enable or disable the page."""
         self._file_list.set_enabled(enabled)
         self._codec_combo.setEnabled(enabled)
+        self._resolution_combo.setEnabled(enabled)
         self._crf_slider.setEnabled(enabled)
         self._preset_combo.setEnabled(enabled)
         if enabled:
