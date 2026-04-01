@@ -51,6 +51,7 @@ from ..core.url_domains import extract_hostnames
 from ..core.netscape_cookies import cookiefile_has_domain_suffix
 from ..services.config_service import ConfigService
 from ..services.session_service import SessionService
+from ..services.saved_task_service import SavedTaskService
 from ..data.database import Database
 from ..data.models import OutputConfig, Session
 from ..data.repositories.download_repository import DownloadRepository
@@ -137,11 +138,16 @@ class MainWindow(QMainWindow):
     """
 
     def __init__(
-        self, database: Database, session_service: SessionService, parent=None
+        self,
+        database: Database,
+        session_service: SessionService,
+        saved_task_service: Optional[SavedTaskService] = None,
+        parent=None,
     ):
         super().__init__(parent)
         self.database = database
         self.session_service = session_service
+        self.saved_task_service = saved_task_service
 
         # Initialize repositories
         self.download_repo = DownloadRepository(database)

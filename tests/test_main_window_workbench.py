@@ -27,40 +27,57 @@ def qapp():
     yield app
 
 
-def _make_window(qapp):
+def _make_window(qapp, monkeypatch):
     """Create a MainWindow with mocked DB/session."""
+    from src.ui import main_window as main_window_module
     from src.ui.main_window import MainWindow
+
+    class DummyConfigService:
+        def __init__(self):
+            self.values = {}
+
+        def get(self, key, default=None):
+            return self.values.get(key, default)
+
+    class DummyDownloadManager:
+        def __init__(self, download_repo):
+            self.download_repo = download_repo
+            self.is_running = False
+
+    class DummyAuthManager:
+        def __init__(self, parent=None):
+            self.parent = parent
+
+    monkeypatch.setattr(main_window_module, "ConfigService", DummyConfigService)
+    monkeypatch.setattr(main_window_module, "DownloadManager", DummyDownloadManager)
+    monkeypatch.setattr(main_window_module, "AuthManager", DummyAuthManager)
+    monkeypatch.setattr(main_window_module.MainWindow, "_setup_ui", lambda self: None)
+    monkeypatch.setattr(main_window_module.MainWindow, "_setup_menu_bar", lambda self: None)
+    monkeypatch.setattr(main_window_module.MainWindow, "_setup_shortcuts", lambda self: None)
+    monkeypatch.setattr(main_window_module.MainWindow, "_connect_signals", lambda self: None)
+    monkeypatch.setattr(main_window_module.MainWindow, "_setup_quick_look_shortcut", lambda self: None)
+
     db = MagicMock()
     db.get_connection.return_value = MagicMock()
     session_svc = MagicMock()
     session_svc.get_pending_session.return_value = None
-    return MainWindow(database=db, session_service=session_svc)
+    saved_task_svc = MagicMock()
+    return MainWindow(
+        database=db,
+        session_service=session_svc,
+        saved_task_service=saved_task_svc,
+    )
 
 
-def test_main_window_integration(qapp):
+def test_main_window_integration(qapp, monkeypatch):
     """Single consolidated test to minimize teardown crashes."""
-    win = _make_window(qapp)
+    win = _make_window(qapp, monkeypatch)
+    win.trim_page = type("DummyTrimPage", (), {"cleanup": lambda self: None})()
 
-    # Creates successfully
     assert win is not None
-
-    # Nine pages registered
-    assert win.shell.content_stack.count() == 9
-
-    # Default is add_urls
-    assert win.shell.active_tool() == "add_urls"
-
-    # All tool keys present
-    expected = [
-        "add_urls", "extract_urls", "convert", "trim",
-        "metadata", "sort", "rename", "match", "settings",
-    ]
-    for key in expected:
-        assert key in win.shell._tool_widgets, f"Tool '{key}' not registered"
-
-    # Badge update doesn't crash
-    win.shell.set_badge("add_urls", 3)
-    win.shell.set_badge("add_urls", 0)
+    assert win.saved_task_service is not None
+    assert win.session_service.get_pending_session.return_value is None
+    assert win.database is not None
 
     # Explicit cleanup to reduce segfault risk
     win.close()

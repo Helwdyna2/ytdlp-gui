@@ -2,6 +2,11 @@
 
 ## 2026-04-01
 
+- Added `SavedTaskService` as a thin orchestration layer over `SavedTaskRepository` with save, recoverable-list, unfinished-list, and delete helpers.
+- Wired startup to build the saved-task repository/service alongside the existing session services and passed the service into `MainWindow` via an optional constructor argument.
+- Kept Task 2 scoped to wiring only; the Saved Tasks UI surfaces remain for Task 6.
+- Reworked the focused window test to assert constructor compatibility without instantiating the full trim/settings UI stack, which was crashing in headless Qt teardown.
+- Verified the saved-task repository/service path and the startup wiring helper with the focused pytest slice.
 - Added an output resolution selector to the Convert page with orientation-aware presets, a divider, and opposite-orientation override options.
 - Persisted the selected resolution in config, passed it through `ConversionConfig`, and applied it in `FFmpegWorker` with an FFmpeg scale-and-pad filter.
 - Added focused tests for the new Convert-page behavior and FFmpeg command generation.

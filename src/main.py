@@ -15,8 +15,10 @@ from .utils.constants import APP_NAME, APP_VERSION
 from .utils.ffmpeg_utils import check_ffmpeg_available, get_ffmpeg_version
 from .data.database import Database
 from .data.repositories.session_repository import SessionRepository
+from .data.repositories.saved_task_repository import SavedTaskRepository
 from .services.crash_recovery_service import CrashRecoveryService
 from .services.config_service import ConfigService
+from .services.saved_task_service import SavedTaskService
 from .services.session_service import SessionService
 from .ui.main_window import MainWindow
 from .ui.theme.theme_engine import ThemeEngine
@@ -242,6 +244,25 @@ def configure_process_locale(logger: logging.Logger) -> None:
     logger.info("Adjusted LC_NUMERIC from %r to 'C' during startup.", current)
 
 
+def build_startup_services(database: Database) -> dict[str, object]:
+    """Create the service objects used by the application startup path."""
+    config_service = ConfigService()
+    session_repo = SessionRepository(database)
+    saved_task_repo = SavedTaskRepository(database)
+    crash_service = CrashRecoveryService(session_repo)
+    session_service = SessionService(session_repo)
+    saved_task_service = SavedTaskService(saved_task_repo)
+
+    return {
+        "config_service": config_service,
+        "session_repo": session_repo,
+        "saved_task_repo": saved_task_repo,
+        "crash_service": crash_service,
+        "session_service": session_service,
+        "saved_task_service": saved_task_service,
+    }
+
+
 def main():
     """Main application entry point."""
     # Setup logging first
@@ -288,10 +309,12 @@ def main():
         database = Database()
 
         # Initialize services
-        config_service = ConfigService()
-        session_repo = SessionRepository(database)
-        crash_service = CrashRecoveryService(session_repo)
-        session_service = SessionService(session_repo)
+        services = build_startup_services(database)
+        config_service = services["config_service"]
+        session_repo = services["session_repo"]
+        crash_service = services["crash_service"]
+        session_service = services["session_service"]
+        saved_task_service = services["saved_task_service"]
 
         # Check for crash recovery
         session_to_restore = None
@@ -306,7 +329,7 @@ def main():
 
         # Create main window
         logger.info("Creating main window...")
-        main_window = MainWindow(database, session_service)
+        main_window = MainWindow(database, session_service, saved_task_service)
 
         # Start auto-save
         session_service.start_auto_save()

@@ -8,6 +8,7 @@ import pytest
 from src.data.database import Database
 from src.data.models import SavedTask, SavedTaskStatus
 from src.data.repositories import SavedTaskRepository
+from src.services.saved_task_service import SavedTaskService
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +22,10 @@ def reset_database():
 def _build_repository(tmp_path):
     db = Database(db_path=str(tmp_path / "saved_tasks.sqlite3"))
     return SavedTaskRepository(db)
+
+
+def _build_service(tmp_path):
+    return SavedTaskService(_build_repository(tmp_path))
 
 
 def _seed_legacy_v4_saved_tasks_db(db_path):
@@ -165,6 +170,83 @@ def test_saved_task_latest_unfinished_prefers_most_recent_active_task(tmp_path):
     assert [task.summary["title"] for task in unfinished] == ["newer", "old"]
 
 
+def test_saved_task_service_handles_save_list_recover_and_delete(tmp_path):
+    service = _build_service(tmp_path)
+    base_time = datetime(2024, 1, 1, 12, 0, 0)
+
+    active = service.save_task(
+        SavedTask(
+            task_type="download",
+            title="Active task",
+            status=SavedTaskStatus.ACTIVE,
+            payload={"id": "active"},
+            summary={"title": "Active task"},
+            created_at=base_time,
+            updated_at=base_time,
+        )
+    )
+    paused = service.save_task(
+        SavedTask(
+            task_type="trim",
+            title="Paused task",
+            status=SavedTaskStatus.PAUSED,
+            payload={"id": "paused"},
+            summary={"title": "Paused task"},
+            created_at=base_time + timedelta(minutes=1),
+            updated_at=base_time + timedelta(minutes=1),
+        )
+    )
+    service.save_task(
+        SavedTask(
+            task_type="convert",
+            title="Completed task",
+            status=SavedTaskStatus.COMPLETED,
+            payload={"id": "done"},
+            summary={"title": "Completed task"},
+            created_at=base_time + timedelta(minutes=2),
+            updated_at=base_time + timedelta(minutes=2),
+        )
+    )
+
+    latest = service.get_latest_recoverable_task()
+    unfinished = service.list_unfinished_tasks()
+
+    assert latest is not None
+    assert latest.id == paused.id
+    assert [task.title for task in unfinished] == ["Paused task", "Active task"]
+
+    assert service.delete_task(paused.id) is True
+    assert service.get_latest_recoverable_task().id == active.id
+    assert [task.title for task in service.list_unfinished_tasks()] == ["Active task"]
+
+
+def test_saved_task_service_updates_existing_task(tmp_path):
+    service = _build_service(tmp_path)
+    task = service.save_task(
+        SavedTask(
+            task_type="download",
+            title="Original title",
+            status=SavedTaskStatus.ACTIVE,
+            payload={"step": 1},
+            summary={"title": "Original title"},
+        )
+    )
+
+    task.title = "Updated title"
+    task.status = SavedTaskStatus.PAUSED
+    task.payload = {"step": 2}
+    task.summary = {"title": "Updated title"}
+
+    updated = service.save_task(task)
+    fetched = service.repository.get_by_id(updated.id)
+
+    assert updated.id == task.id
+    assert fetched is not None
+    assert fetched.title == "Updated title"
+    assert fetched.status == SavedTaskStatus.PAUSED
+    assert fetched.payload == {"step": 2}
+
+
 def test_database_repairs_legacy_v4_saved_tasks_schema(tmp_path):
     db_path = str(tmp_path / "saved_tasks.sqlite3")
     _seed_legacy_v4_saved_tasks_db(db_path)
@@ -198,3 +280,20 @@ def test_database_repairs_legacy_v4_saved_tasks_schema(tmp_path):
     assert updated.title == "Trim task updated"
     assert updated.status == SavedTaskStatus.PAUSED
     assert repo.get_latest_unfinished() is not None
+
+
+def test_build_startup_services_includes_saved_task_service(monkeypatch, tmp_path):
+    import src.main as main_module
+
+    class DummyConfigService:
+        def __init__(self):
+            self.loaded = True
+
+    monkeypatch.setattr(main_module, "ConfigService", DummyConfigService)
+
+    database = Database(db_path=str(tmp_path / "startup.sqlite3"))
+    services = main_module.build_startup_services(database)
+
+    assert services["saved_task_service"].repository.db is database
+    assert services["session_service"].session_repo.db is database
+    assert services["saved_task_repo"].db is database
