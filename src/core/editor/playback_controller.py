@@ -59,6 +59,7 @@ class PlaybackController(QObject):
         self._last_loaded_path: Optional[str] = None
         self._seek_serial = 0
         self._pending_seek_serial: Optional[int] = None
+        self._media_loaded = False
         self._hwdec_current = "unknown"
         self._video_decoder = ""
         self._video_decoder_desc = ""
@@ -177,6 +178,7 @@ class PlaybackController(QObject):
         try:
             self._position = 0.0
             self._pending_seek_serial = None
+            self._media_loaded = False
             self._reset_decoder_status()
             self.position_changed.emit(0.0)
             self._client.command(["loadfile", path, "replace"])
@@ -215,6 +217,7 @@ class PlaybackController(QObject):
             self._position = 0.0
             self._duration = 0.0
             self._is_playing = False
+            self._media_loaded = False
             return
         try:
             self._client.command(["stop"])
@@ -222,6 +225,7 @@ class PlaybackController(QObject):
             self._duration = 0.0
             self._is_playing = False
             self._pending_seek_serial = None
+            self._media_loaded = False
             self._reset_decoder_status()
             self.position_changed.emit(0.0)
             self.duration_changed.emit(0.0)
@@ -243,6 +247,15 @@ class PlaybackController(QObject):
             self._pending_seek_serial = None
             self.error_occurred.emit(str(exc))
             return None
+
+    def seek_relative(self, delta_seconds: float, precise: bool = True) -> Optional[int]:
+        """Seek relative to the current playback position."""
+        if not self.is_available():
+            return None
+        target = max(0.0, self._position + delta_seconds)
+        if self._duration > 0:
+            target = min(target, self._duration)
+        return self.seek(target, precise=precise)
 
     def step_frame_forward(self) -> None:
         if not self.is_available():
@@ -281,9 +294,9 @@ class PlaybackController(QObject):
 
     def cleanup(self) -> None:
         self.detach_render_context()
-        if self._client is not None:
+        if self._client is not None and hasattr(self._client, "terminate"):
             self._client.terminate()
-            self._client = None
+        self._client = None
         self._binding = None
         self._wakeup_callback = None
 
@@ -334,11 +347,14 @@ class PlaybackController(QObject):
         elif event.event_id == MPV_EVENT_FILE_LOADED:
             self._position = 0.0
             self._pending_seek_serial = None
+            self._media_loaded = True
+            self._emit_decoder_status()
             self.file_loaded.emit()
         elif event.event_id == MPV_EVENT_END_FILE:
             self._position = 0.0
             self._is_playing = False
             self._pending_seek_serial = None
+            self._media_loaded = False
             self._reset_decoder_status()
             self.position_changed.emit(0.0)
             self.playback_state_changed.emit(False)
@@ -365,8 +381,7 @@ class PlaybackController(QObject):
                 self._is_playing = not value
                 self.playback_state_changed.emit(self._is_playing)
         elif prop.format == MPV_FORMAT_STRING:
-            raw_value = ctypes.cast(prop.data, ctypes.c_char_p).value if prop.data else None
-            value = raw_value.decode("utf-8", "replace") if raw_value else ""
+            value = self._decode_mpv_string(prop.data)
             if name == "hwdec-current":
                 self._hwdec_current = value or "unknown"
                 self._emit_decoder_status()
@@ -391,8 +406,29 @@ class PlaybackController(QObject):
         self._emit_decoder_status()
 
     def _emit_decoder_status(self) -> None:
+        if not self._media_loaded:
+            self.decoder_status_changed.emit("", "", "")
+            return
         self.decoder_status_changed.emit(
             self._hwdec_current,
             self._video_decoder,
             self._video_decoder_desc,
         )
+
+    def _decode_mpv_string(self, data: ctypes.c_void_p) -> str:
+        if not data:
+            return ""
+        try:
+            raw_value = ctypes.cast(
+                data, ctypes.POINTER(ctypes.c_char_p)
+            ).contents.value
+        except (TypeError, ValueError):
+            return ""
+        if not raw_value:
+            return ""
+        decoded = raw_value.decode("utf-8", "replace").replace("\x00", "").strip()
+        if not decoded:
+            return ""
+        return "".join(
+            char for char in decoded if char.isprintable() or char in "\t "
+        ).strip()

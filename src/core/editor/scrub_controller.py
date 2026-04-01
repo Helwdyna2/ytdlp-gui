@@ -26,6 +26,9 @@ class ScrubController(QObject):
         self._exact_settle_delay_ms = config.get(
             "trim.playback.scrub_exact_settle_delay_ms", 120
         )
+        self._scrub_step_seconds = float(
+            config.get("trim.playback.scrub_step_seconds", 0.25)
+        )
         self._resume_after_scrub = config.get(
             "trim.playback.resume_after_scrub", False
         )
@@ -102,7 +105,8 @@ class ScrubController(QObject):
             return
         if self._requested_position == self._last_sent_position:
             return
-        self._playback.seek(self._requested_position, precise=False)
+        precise = self._should_use_precise_preview_seek()
+        self._playback.seek(self._requested_position, precise=precise)
         self._last_sent_position = self._requested_position
         if self._drag_active:
             self._restart_dispatch_timer()
@@ -166,3 +170,12 @@ class ScrubController(QObject):
             multiplier = 6.0
 
         return max(self._send_interval_ms, int(round(self._send_interval_ms * multiplier)))
+
+    def _should_use_precise_preview_seek(self) -> bool:
+        if self._requested_position is None:
+            return False
+        anchor = self._last_sent_position
+        if anchor is None:
+            anchor = self._playback.position()
+        distance = abs(self._requested_position - anchor)
+        return distance <= max(0.75, self._scrub_step_seconds * 4.0)

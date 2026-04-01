@@ -111,6 +111,7 @@ def test_settings_page_has_required_sections(qapp):
         "Rate Limiting",
         "Retry Logic",
         "Advanced Download Options",
+        "Trim & Shortcuts",
     ]
     for name in required:
         assert name in titles, f"Missing settings section: {name}"

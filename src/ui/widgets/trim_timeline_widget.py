@@ -1,74 +1,284 @@
-"""Timeline widget for video trimming with range selection."""
+"""LosslessCut-inspired timeline widget for the Trim editor."""
 
-import logging
-from typing import Tuple, Optional
+from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QSlider,
-    QSizePolicy,
-)
+from dataclasses import dataclass
+from typing import Optional
+
+from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QPen
+from PyQt6.QtWidgets import QLabel, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 
 from ..theme.style_utils import set_status_color
 
-logger = logging.getLogger(__name__)
 
-# Try to import superqt for range slider, fall back to basic implementation
-SUPERQT_AVAILABLE = False
-try:
-    from superqt import QLabeledDoubleRangeSlider
+@dataclass(slots=True)
+class _SegmentView:
+    segment_id: str
+    label: str
+    start_time: float
+    end_time: float
+    enabled: bool
 
-    SUPERQT_AVAILABLE = True
-except ImportError:
-    logger.warning("superqt not installed. Using basic range controls.")
-except Exception as e:
-    logger.warning(f"Failed to import superqt: {e}")
+
+class _TimelineCanvas(QWidget):
+    range_changed = pyqtSignal(float, float)
+    seek_requested = pyqtSignal(float)
+    segment_selected = pyqtSignal(str)
+
+    _MARGIN_X = 12
+    _TRACK_HEIGHT = 36
+    _HANDLE_HIT_RADIUS = 8
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._duration = 0.0
+        self._current_position = 0.0
+        self._segments: list[_SegmentView] = []
+        self._selected_segment_id: Optional[str] = None
+        self._drag_mode: Optional[str] = None
+        self._segment_rects: dict[str, QRectF] = {}
+        self.setMinimumHeight(88)
+        self.setMouseTracking(True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def set_state(
+        self,
+        duration: float,
+        segments: list[_SegmentView],
+        selected_segment_id: Optional[str],
+        current_position: float,
+    ) -> None:
+        self._duration = max(0.0, duration)
+        self._segments = list(segments)
+        self._selected_segment_id = selected_segment_id
+        self._current_position = max(0.0, current_position)
+        self.update()
+
+    def paintEvent(self, _event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        track_rect = self._track_rect()
+        palette = self.palette()
+        surface = palette.color(self.backgroundRole())
+        base_border = QColor("#30343f")
+        base_fill = QColor("#191c25")
+        disabled_fill = QColor("#2b2f39")
+        selected_fill = QColor("#5e5ad7")
+        selected_border = QColor("#c6c3ff")
+        enabled_fill = QColor("#3e546b")
+        handle_fill = QColor("#f4f1ff")
+        playhead_color = QColor("#3bd1ff")
+
+        painter.setPen(QPen(base_border, 1))
+        painter.setBrush(base_fill)
+        painter.drawRoundedRect(track_rect, 10, 10)
+
+        self._segment_rects = {}
+        for index, segment in enumerate(self._segments):
+            rect = self._segment_rect(track_rect, segment.start_time, segment.end_time)
+            self._segment_rects[segment.segment_id] = rect
+            is_selected = segment.segment_id == self._selected_segment_id
+            fill = selected_fill if is_selected else enabled_fill
+            if not segment.enabled:
+                fill = disabled_fill
+            border = selected_border if is_selected else QColor(fill).lighter(115)
+            painter.setPen(QPen(border, 1.5 if is_selected else 1))
+            painter.setBrush(fill)
+            painter.drawRoundedRect(rect, 8, 8)
+
+            painter.setPen(QColor("#ffffff") if is_selected else QColor("#e7ebf3"))
+            label = segment.label or f"{index + 1}"
+            text_rect = rect.adjusted(10, 0, -10, 0)
+            if text_rect.width() > 18:
+                painter.drawText(
+                    text_rect.toRect(),
+                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                    label,
+                )
+
+        if self._selected_segment_id:
+            selected = self._selected_segment()
+            if selected is not None:
+                for handle_x in (
+                    self._time_to_x(selected.start_time, track_rect),
+                    self._time_to_x(selected.end_time, track_rect),
+                ):
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(handle_fill)
+                    painter.drawEllipse(
+                        QPointF(handle_x, track_rect.center().y()),
+                        5.5,
+                        5.5,
+                    )
+
+        if self._duration > 0:
+            playhead_x = self._time_to_x(self._current_position, track_rect)
+            painter.setPen(QPen(playhead_color, 2))
+            painter.drawLine(
+                QPointF(playhead_x, track_rect.top() - 8),
+                QPointF(playhead_x, track_rect.bottom() + 8),
+            )
+
+        painter.setPen(surface.lighter(180))
+        painter.drawText(
+            QRectF(0, track_rect.bottom() + 10, self.width(), 18),
+            Qt.AlignmentFlag.AlignCenter,
+            self._format_time(self._current_position),
+        )
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if not self.isEnabled() or self._duration <= 0:
+            return
+
+        track_rect = self._track_rect()
+        selected = self._selected_segment()
+        if (
+            selected is not None
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._pressed_handle(event.position().x(), selected, track_rect)
+        ):
+            return
+
+        segment_id = self._segment_id_at(event.position())
+        if segment_id:
+            self.segment_selected.emit(segment_id)
+
+        self.seek_requested.emit(self._x_to_time(event.position().x(), track_rect))
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        track_rect = self._track_rect()
+        selected = self._selected_segment()
+        if self._drag_mode and selected is not None:
+            position = self._x_to_time(event.position().x(), track_rect)
+            if self._drag_mode == "start":
+                self.range_changed.emit(position, selected.end_time)
+            elif self._drag_mode == "end":
+                self.range_changed.emit(selected.start_time, position)
+            return
+
+        if selected is None:
+            self.unsetCursor()
+            return
+
+        if self._pressed_handle(event.position().x(), selected, track_rect, activate=False):
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        else:
+            self.unsetCursor()
+
+    def mouseReleaseEvent(self, _event: QMouseEvent) -> None:
+        self._drag_mode = None
+        self.unsetCursor()
+
+    def leaveEvent(self, _event) -> None:
+        if not self._drag_mode:
+            self.unsetCursor()
+
+    def _pressed_handle(
+        self,
+        pos_x: float,
+        selected: _SegmentView,
+        track_rect: QRectF,
+        *,
+        activate: bool = True,
+    ) -> bool:
+        start_x = self._time_to_x(selected.start_time, track_rect)
+        end_x = self._time_to_x(selected.end_time, track_rect)
+        if abs(pos_x - start_x) <= self._HANDLE_HIT_RADIUS:
+            if activate:
+                self._drag_mode = "start"
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            return True
+        if abs(pos_x - end_x) <= self._HANDLE_HIT_RADIUS:
+            if activate:
+                self._drag_mode = "end"
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            return True
+        return False
+
+    def _selected_segment(self) -> Optional[_SegmentView]:
+        if not self._selected_segment_id:
+            return None
+        for segment in self._segments:
+            if segment.segment_id == self._selected_segment_id:
+                return segment
+        return None
+
+    def _segment_id_at(self, position: QPointF) -> Optional[str]:
+        for segment_id, rect in self._segment_rects.items():
+            if rect.contains(position):
+                return segment_id
+        return None
+
+    def _track_rect(self) -> QRectF:
+        return QRectF(
+            self._MARGIN_X,
+            18,
+            max(0.0, self.width() - (self._MARGIN_X * 2)),
+            self._TRACK_HEIGHT,
+        )
+
+    def _segment_rect(self, track_rect: QRectF, start: float, end: float) -> QRectF:
+        left = self._time_to_x(start, track_rect)
+        right = self._time_to_x(end, track_rect)
+        width = max(10.0, right - left)
+        return QRectF(left, track_rect.top() + 2, width, track_rect.height() - 4)
+
+    def _time_to_x(self, value: float, track_rect: QRectF) -> float:
+        if self._duration <= 0:
+            return track_rect.left()
+        ratio = max(0.0, min(1.0, value / self._duration))
+        return track_rect.left() + (track_rect.width() * ratio)
+
+    def _x_to_time(self, pos_x: float, track_rect: QRectF) -> float:
+        if self._duration <= 0 or track_rect.width() <= 0:
+            return 0.0
+        ratio = (pos_x - track_rect.left()) / track_rect.width()
+        ratio = max(0.0, min(1.0, ratio))
+        return ratio * self._duration
+
+    def _format_time(self, seconds: float) -> str:
+        seconds = max(0.0, seconds)
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = seconds % 60
+        millis = int((secs % 1) * 1000)
+        return f"{hours:02d}:{minutes:02d}:{int(secs):02d}.{millis:03d}"
 
 
 class TrimTimelineWidget(QWidget):
     """
-    Timeline widget for selecting trim start and end points.
-
-    Features:
-    - Draggable range slider for selecting start/end points
-    - Time display labels
-    - Playhead position indicator
-    - Click-to-seek functionality
+    Dense timeline widget for selecting, seeking, and editing segment ranges.
 
     Signals:
         range_changed: Emits (start_time, end_time) when range changes
         seek_requested: Emits position when user clicks to seek
+        segment_selected: Emits a segment id when a block is clicked
     """
 
-    range_changed = pyqtSignal(float, float)  # start_time, end_time
-    seek_requested = pyqtSignal(float)  # position in seconds
+    range_changed = pyqtSignal(float, float)
+    seek_requested = pyqtSignal(float)
+    segment_selected = pyqtSignal(str)
 
     def __init__(self, parent=None):
-        """Initialize the timeline widget."""
         super().__init__(parent)
-
-        self._duration: float = 0.0
-        self._start_time: float = 0.0
-        self._end_time: float = 0.0
-        self._current_position: float = 0.0
-        self._superqt_available = SUPERQT_AVAILABLE
+        self._duration = 0.0
+        self._start_time = 0.0
+        self._end_time = 0.0
+        self._current_position = 0.0
+        self._segments: list[_SegmentView] = []
+        self._selected_segment_id: Optional[str] = None
 
         self._setup_ui()
         self._connect_signals()
 
     def _setup_ui(self) -> None:
-        """Build the UI layout."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        # Time display row
         time_layout = QHBoxLayout()
-
         self._start_label = QLabel("Start: 00:00:00.000")
         self._start_label.setObjectName("boldLabel")
         time_layout.addWidget(self._start_label)
@@ -87,231 +297,114 @@ class TrimTimelineWidget(QWidget):
 
         layout.addLayout(time_layout)
 
-        # Range slider for trim selection
-        if self._superqt_available:
-            self._range_slider = QLabeledDoubleRangeSlider(Qt.Orientation.Horizontal)
-            self._range_slider.setRange(0, 100)
-            self._range_slider.setValue((0, 100))
-            self._range_slider.setDecimals(3)
-            # Hide the built-in labels since we show our own
-            self._range_slider.setHandleLabelPosition(
-                QLabeledDoubleRangeSlider.LabelPosition.NoLabel
-            )
-            self._range_slider.setEdgeLabelMode(
-                QLabeledDoubleRangeSlider.EdgeLabelMode.NoLabel
-            )
-            layout.addWidget(self._range_slider)
-        else:
-            # Fallback: Two separate sliders for start and end
-            range_container = QWidget()
-            range_layout = QHBoxLayout(range_container)
-            range_layout.setContentsMargins(0, 0, 0, 0)
+        self._canvas = _TimelineCanvas(self)
+        layout.addWidget(self._canvas)
 
-            # Start slider
-            start_container = QWidget()
-            start_layout = QVBoxLayout(start_container)
-            start_layout.setContentsMargins(0, 0, 0, 0)
-            start_layout.addWidget(QLabel("Start:"))
-            self._start_slider = QSlider(Qt.Orientation.Horizontal)
-            self._start_slider.setRange(0, 100000)
-            self._start_slider.setValue(0)
-            start_layout.addWidget(self._start_slider)
-            range_layout.addWidget(start_container)
-
-            # End slider
-            end_container = QWidget()
-            end_layout = QVBoxLayout(end_container)
-            end_layout.setContentsMargins(0, 0, 0, 0)
-            end_layout.addWidget(QLabel("End:"))
-            self._end_slider = QSlider(Qt.Orientation.Horizontal)
-            self._end_slider.setRange(0, 100000)
-            self._end_slider.setValue(100000)
-            end_layout.addWidget(self._end_slider)
-            range_layout.addWidget(end_container)
-
-            layout.addWidget(range_container)
-
-            # Placeholder for the range_slider attribute
-            self._range_slider = None
-
-        # Info label
         info_label = QLabel(
-            "Drag the handles to set trim start and end points. "
-            "Lossless mode cuts at keyframes (may vary slightly)."
+            "Click anywhere to seek. Drag the highlighted segment handles to tighten a cut."
         )
         info_label.setObjectName("dimLabel")
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
 
     def _connect_signals(self) -> None:
-        """Wire up signal connections."""
-        if self._superqt_available and self._range_slider:
-            self._range_slider.valuesChanged.connect(self._on_range_changed)
-        else:
-            self._start_slider.valueChanged.connect(self._on_fallback_start_changed)
-            self._end_slider.valueChanged.connect(self._on_fallback_end_changed)
+        self._canvas.range_changed.connect(self._on_canvas_range_changed)
+        self._canvas.seek_requested.connect(self.seek_requested.emit)
+        self._canvas.segment_selected.connect(self.segment_selected.emit)
 
-    def _on_range_changed(self, values: Tuple[float, float]) -> None:
-        """Handle range slider value change (superqt version)."""
-        self._start_time = values[0]
-        self._end_time = values[1]
+    def _on_canvas_range_changed(self, start: float, end: float) -> None:
+        self._start_time = start
+        self._end_time = end
         self._update_labels()
-        self.range_changed.emit(self._start_time, self._end_time)
-
-    def _on_fallback_start_changed(self, value: int) -> None:
-        """Handle start slider change (fallback version)."""
-        if self._duration > 0:
-            self._start_time = (value / 100000) * self._duration
-
-            # Ensure start doesn't exceed end
-            end_value = self._end_slider.value()
-            if value >= end_value:
-                self._start_slider.setValue(max(0, end_value - 1))
-                return
-
-            self._update_labels()
-            self.range_changed.emit(self._start_time, self._end_time)
-
-    def _on_fallback_end_changed(self, value: int) -> None:
-        """Handle end slider change (fallback version)."""
-        if self._duration > 0:
-            self._end_time = (value / 100000) * self._duration
-
-            # Ensure end doesn't go below start
-            start_value = self._start_slider.value()
-            if value <= start_value:
-                self._end_slider.setValue(min(1000, start_value + 1))
-                return
-
-            self._update_labels()
-            self.range_changed.emit(self._start_time, self._end_time)
+        self.range_changed.emit(start, end)
 
     def _update_labels(self) -> None:
-        """Update time display labels."""
         self._start_label.setText(f"Start: {self._format_time(self._start_time)}")
         self._end_label.setText(f"End: {self._format_time(self._end_time)}")
-
-        trimmed_duration = max(0, self._end_time - self._start_time)
+        trimmed_duration = max(0.0, self._end_time - self._start_time)
         self._trimmed_duration_label.setText(
             f"Trimmed: {self._format_time(trimmed_duration)}"
         )
 
-    def _format_time(self, seconds: float) -> str:
-        """Format time in seconds to HH:MM:SS.mmm format."""
-        if seconds < 0:
-            seconds = 0
+    def _sync_canvas(self) -> None:
+        self._canvas.set_state(
+            self._duration,
+            self._segments,
+            self._selected_segment_id,
+            self._current_position,
+        )
 
+    def _format_time(self, seconds: float) -> str:
+        seconds = max(0.0, seconds)
         hours = int(seconds // 3600)
         minutes = int((seconds % 3600) // 60)
         secs = seconds % 60
         millis = int((secs % 1) * 1000)
-        secs = int(secs)
-
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
-
-    # ========== Public API ==========
+        return f"{hours:02d}:{minutes:02d}:{int(secs):02d}.{millis:03d}"
 
     def set_duration(self, duration: float) -> None:
-        """
-        Set the video duration and initialize the range.
-
-        Args:
-            duration: Video duration in seconds
-        """
-        self._duration = duration
+        self._duration = max(0.0, duration)
         self._start_time = 0.0
-        self._end_time = duration
-
-        if self._superqt_available and self._range_slider:
-            self._range_slider.setRange(0, duration)
-            self._range_slider.setValue((0, duration))
-        else:
-            self._start_slider.setValue(0)
-            self._end_slider.setValue(100000)
-
+        self._end_time = self._duration
         self._update_labels()
+        self._sync_canvas()
 
     def set_range(self, start: float, end: float) -> None:
-        """
-        Set the trim range.
-
-        Args:
-            start: Start time in seconds
-            end: End time in seconds
-        """
-        self._start_time = max(0, min(start, self._duration))
+        self._start_time = max(0.0, min(start, self._duration))
         self._end_time = max(self._start_time, min(end, self._duration))
-
-        if self._superqt_available and self._range_slider:
-            self._range_slider.setValue((self._start_time, self._end_time))
-        else:
-            if self._duration > 0:
-                start_val = int((self._start_time / self._duration) * 100000)
-                end_val = int((self._end_time / self._duration) * 100000)
-                self._start_slider.blockSignals(True)
-                self._end_slider.blockSignals(True)
-                self._start_slider.setValue(start_val)
-                self._end_slider.setValue(end_val)
-                self._start_slider.blockSignals(False)
-                self._end_slider.blockSignals(False)
-
+        for segment in self._segments:
+            if segment.segment_id == self._selected_segment_id:
+                segment.start_time = self._start_time
+                segment.end_time = self._end_time
+                break
         self._update_labels()
+        self._sync_canvas()
 
-    def get_range(self) -> Tuple[float, float]:
-        """
-        Get the current trim range.
+    def set_segments(self, segments: list, selected_segment_id: Optional[str]) -> None:
+        views: list[_SegmentView] = []
+        for index, segment in enumerate(segments):
+            label = getattr(segment, "label", "") or f"Segment {index + 1}"
+            views.append(
+                _SegmentView(
+                    segment_id=getattr(segment, "id"),
+                    label=label,
+                    start_time=float(getattr(segment, "start_time")),
+                    end_time=float(getattr(segment, "end_time")),
+                    enabled=bool(getattr(segment, "enabled", True)),
+                )
+            )
+        self._segments = views
+        self._selected_segment_id = selected_segment_id
+        self._sync_canvas()
 
-        Returns:
-            Tuple of (start_time, end_time) in seconds
-        """
+    def get_range(self) -> tuple[float, float]:
         return (self._start_time, self._end_time)
 
     def get_start_time(self) -> float:
-        """Get the trim start time in seconds."""
         return self._start_time
 
     def get_end_time(self) -> float:
-        """Get the trim end time in seconds."""
         return self._end_time
 
     def get_trimmed_duration(self) -> float:
-        """Get the duration of the trimmed segment in seconds."""
-        return max(0, self._end_time - self._start_time)
+        return max(0.0, self._end_time - self._start_time)
 
     def get_duration(self) -> float:
-        """Get the total video duration."""
         return self._duration
 
     def set_current_position(self, position: float) -> None:
-        """
-        Set the current playback position (for visual feedback).
-
-        Args:
-            position: Current position in seconds
-        """
-        self._current_position = position
-        # Could add a visual indicator here if desired
+        self._current_position = max(0.0, position)
+        self._sync_canvas()
 
     def reset(self) -> None:
-        """Reset the timeline to default state."""
         self._duration = 0.0
         self._start_time = 0.0
         self._end_time = 0.0
         self._current_position = 0.0
-
-        if self._superqt_available and self._range_slider:
-            self._range_slider.setRange(0, 100)
-            self._range_slider.setValue((0, 100))
-        else:
-            self._start_slider.setValue(0)
-            self._end_slider.setValue(100000)
-
+        self._segments = []
+        self._selected_segment_id = None
         self._update_labels()
+        self._sync_canvas()
 
     def set_enabled(self, enabled: bool) -> None:
-        """Enable or disable the timeline controls."""
-        if self._superqt_available and self._range_slider:
-            self._range_slider.setEnabled(enabled)
-        else:
-            self._start_slider.setEnabled(enabled)
-            self._end_slider.setEnabled(enabled)
+        self._canvas.setEnabled(enabled)
