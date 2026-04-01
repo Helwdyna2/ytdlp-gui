@@ -63,10 +63,13 @@ DEFAULT_CONFIG = {
     },
     "convert": {
         "output_dir": "",
-        "codec": "libx264",
+        "codec": "h264",
         "crf": 23,
         "preset": "medium",
         "use_hardware_accel": False,
+        "hardware_encoder": "",
+        "source_codec_filter_enabled": False,
+        "source_codec_filter": "",
     },
     "trim": {
         "mode": "single",  # "single" or "batch"

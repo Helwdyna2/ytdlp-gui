@@ -20,14 +20,12 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QProgressBar,
     QMessageBox,
-    QFrame,
-    QScrollArea,
-    QSizePolicy,
 )
 
 from ...core.conversion_manager import ConversionManager
+from ...core.ffprobe_worker import FFprobeWorker
 from ...core.folder_scan_worker import FolderScanWorker
-from ...data.models import ConversionConfig, ConversionJob, ConversionStatus
+from ...data.models import ConversionConfig, ConversionJob
 from ...services.config_service import ConfigService
 from ...utils.constants import (
     DEFAULT_CRF,
@@ -35,16 +33,35 @@ from ...utils.constants import (
     MAX_CRF,
     DEFAULT_PRESET,
     CONVERSION_PRESETS,
-    OUTPUT_CODECS,
     VIDEO_FILE_FILTER,
 )
 from ...utils.dialog_utils import get_dialog_start_dir, update_dialog_last_dir
-from ...utils.hardware_accel import get_cached_hardware_encoders, HardwareEncoder
-from ..theme.style_utils import set_status_color
+from ...utils.hardware_accel import (
+    HardwareEncoder,
+    get_cached_hardware_encoders,
+    get_compatible_hardware_encoders,
+)
 from ..components.page_header import PageHeader
 from ..components.split_layout import SplitLayout
 
 logger = logging.getLogger(__name__)
+
+OUTPUT_FORMATS = [
+    ("mp4 / H.264", "h264"),
+    ("mp4 / H.265 (HEVC)", "hevc"),
+    ("webm / VP9", "vp9"),
+    ("mp3", "mp3"),
+    ("aac", "aac"),
+    ("flac", "flac"),
+]
+
+SOURCE_CODEC_DISPLAY_NAMES = {
+    "h264": "H.264",
+    "hevc": "H.265 (HEVC)",
+    "vp9": "VP9",
+}
+
+TARGET_CODECS_WITH_SOURCE_FILTER = {"h264", "hevc"}
 
 
 class FileListWidget(QWidget):
@@ -230,16 +247,21 @@ class ConvertPage(QWidget):
     def __init__(self, conversion_manager=None, parent=None):
         super().__init__(parent)
         self._conversion_manager: Optional[ConversionManager] = conversion_manager
+        self._codec_probe_worker: Optional[FFprobeWorker] = None
+        self._codec_probe_request_id = 0
         self._pending_job_widgets: Dict[int, str] = {}  # job_id -> filename
         self._done_count: int = 0
         self._failed_count: int = 0
         self._config_service = ConfigService()
         self._hardware_encoders: List[HardwareEncoder] = []
+        self._file_codecs: Dict[str, str] = {}
+        self._loading_settings = False
 
         self._setup_ui()
         self._connect_signals()
         self._load_settings()
         self._detect_hardware()
+        self._refresh_source_codec_scan()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -290,14 +312,8 @@ class ConvertPage(QWidget):
         # Output Format
         sl.addWidget(QLabel("Output Format"))
         self._codec_combo = QComboBox()
-        self._codec_combo.addItems([
-            "mp4 / H.264",
-            "mp4 / H.265 (HEVC)",
-            "webm / VP9",
-            "mp3",
-            "aac",
-            "flac",
-        ])
+        for label, codec in OUTPUT_FORMATS:
+            self._codec_combo.addItem(label, codec)
         sl.addWidget(self._codec_combo)
 
         # Quality
@@ -328,8 +344,14 @@ class ConvertPage(QWidget):
         # Hardware Acceleration
         sl.addWidget(QLabel("Hardware Acceleration"))
         self._hw_combo = QComboBox()
-        self._hw_combo.addItems(["None", "NVENC", "VideoToolbox", "VAAPI"])
         sl.addWidget(self._hw_combo)
+
+        self._source_codec_filter_check = QCheckBox("Only convert source codec")
+        sl.addWidget(self._source_codec_filter_check)
+
+        self._source_codec_combo = QComboBox()
+        self._source_codec_combo.setEnabled(False)
+        sl.addWidget(self._source_codec_combo)
 
         # Output Folder
         sl.addWidget(QLabel("Output Folder"))
@@ -364,9 +386,13 @@ class ConvertPage(QWidget):
         self._start_btn.clicked.connect(self._on_start)
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._crf_slider.valueChanged.connect(self._on_crf_changed)
-        self._codec_combo.currentIndexChanged.connect(self._on_settings_changed)
+        self._codec_combo.currentIndexChanged.connect(self._on_output_codec_changed)
         self._preset_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._hw_combo.currentIndexChanged.connect(self._on_settings_changed)
+        self._source_codec_filter_check.toggled.connect(
+            self._on_source_codec_filter_toggled
+        )
+        self._source_codec_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._output_input.textChanged.connect(self._on_settings_changed)
         self._output_browse_btn.clicked.connect(self._on_browse_output)
 
@@ -376,53 +402,92 @@ class ConvertPage(QWidget):
 
     def _load_settings(self) -> None:
         """Load settings from config service."""
-        codec = self._config_service.get("convert.codec", "libx264")
-        # Map libx264/libx265 -> combo index (0 = H.264, 1 = H.265)
-        self._codec_combo.setCurrentIndex(1 if codec == "libx265" else 0)
+        self._loading_settings = True
+        try:
+            codec = self._normalize_output_codec(
+                self._config_service.get("convert.codec", "h264")
+            )
+            self._set_selected_output_codec(codec)
 
-        crf = self._config_service.get("convert.crf", DEFAULT_CRF)
-        self._crf_slider.setValue(crf)
-        self._crf_label.setText(str(crf))
+            crf = self._config_service.get("convert.crf", DEFAULT_CRF)
+            self._crf_slider.setValue(crf)
+            self._crf_label.setText(str(crf))
 
-        preset = self._config_service.get("convert.preset", DEFAULT_PRESET)
-        idx = self._preset_combo.findText(preset)
-        if idx >= 0:
-            self._preset_combo.setCurrentIndex(idx)
+            preset = self._config_service.get("convert.preset", DEFAULT_PRESET)
+            idx = self._preset_combo.findText(preset)
+            if idx >= 0:
+                self._preset_combo.setCurrentIndex(idx)
 
-        output_dir = self._config_service.get("convert.output_dir", "")
-        self._output_input.setText(output_dir)
+            output_dir = self._config_service.get("convert.output_dir", "")
+            self._output_input.setText(output_dir)
+
+            source_filter_enabled = self._config_service.get(
+                "convert.source_codec_filter_enabled", False
+            )
+            self._source_codec_filter_check.setChecked(source_filter_enabled)
+        finally:
+            self._loading_settings = False
+
+        self._refresh_source_codec_combo()
+        self._update_source_filter_controls()
 
     def _save_settings(self) -> None:
         """Save current settings to config service."""
-        idx = self._codec_combo.currentIndex()
-        codec = "libx265" if idx == 1 else "libx264"
+        if self._loading_settings:
+            return
+
+        codec = self._get_selected_output_codec()
+        hardware_encoder = self._hw_combo.currentData()
+        source_codec = self._get_selected_source_codec()
+
         self._config_service.set("convert.codec", codec)
         self._config_service.set("convert.crf", self._crf_slider.value())
         self._config_service.set("convert.preset", self._preset_combo.currentText())
+        self._config_service.set(
+            "convert.use_hardware_accel", hardware_encoder is not None
+        )
+        self._config_service.set("convert.hardware_encoder", hardware_encoder or "")
+        self._config_service.set(
+            "convert.source_codec_filter_enabled",
+            self._source_codec_filter_check.isChecked(),
+        )
+        self._config_service.set("convert.source_codec_filter", source_codec or "")
         self._config_service.set("convert.output_dir", self._output_input.text())
 
     def _detect_hardware(self) -> None:
         """Detect available hardware encoders and configure combo."""
         try:
             self._hardware_encoders = get_cached_hardware_encoders()
-            if self._hardware_encoders:
-                # Pre-select first available encoder in the combo
-                first = self._hardware_encoders[0]
-                name_map = {
-                    "nvenc": "NVENC",
-                    "videotoolbox": "VideoToolbox",
-                    "vaapi": "VAAPI",
-                }
-                display = name_map.get(first.name.lower(), first.display_name)
-                idx = self._hw_combo.findText(display)
-                if idx >= 0:
-                    self._hw_combo.setCurrentIndex(idx)
+            preferred_hardware = self._config_service.get("convert.hardware_encoder", "")
+            saved_use_hardware = self._config_service.get(
+                "convert.use_hardware_accel", False
+            )
+            self._refresh_hardware_options(
+                preferred_name=preferred_hardware or None,
+                prefer_none=not saved_use_hardware,
+            )
         except Exception as e:
             logger.warning("Hardware detection failed: %s", e)
+            self._hardware_encoders = []
+            self._refresh_hardware_options(preferred_name=None, prefer_none=True)
 
     def _on_crf_changed(self, value: int) -> None:
         """Update CRF label and save."""
         self._crf_label.setText(str(value))
+        self._on_settings_changed()
+
+    def _on_output_codec_changed(self) -> None:
+        """Refresh dependent controls when the output codec changes."""
+        preferred_hardware = self._hw_combo.currentData()
+        self._refresh_hardware_options(
+            preferred_name=preferred_hardware, prefer_none=preferred_hardware is None
+        )
+        self._update_source_filter_controls()
+        self._on_settings_changed()
+
+    def _on_source_codec_filter_toggled(self, checked: bool) -> None:
+        """Enable or disable the source codec selector."""
+        self._update_source_filter_controls()
         self._on_settings_changed()
 
     def _on_settings_changed(self) -> None:
@@ -444,12 +509,51 @@ class ConvertPage(QWidget):
     def _on_files_changed(self) -> None:
         """Enable/disable start button based on file count."""
         self._start_btn.setEnabled(self._file_list.count() > 0)
+        self._refresh_source_codec_scan()
 
     def _on_start(self) -> None:
         """Start conversion."""
         files = self._file_list.get_file_paths()
         if not files:
             return
+
+        files_to_convert = files
+        selected_source_codec = None
+        if self._is_source_codec_filter_active():
+            if self._codec_probe_worker is not None:
+                QMessageBox.information(
+                    self,
+                    "Scanning Codecs",
+                    "Please wait for codec detection to finish before starting a filtered conversion.",
+                )
+                return
+
+            selected_source_codec = self._get_selected_source_codec()
+            if not selected_source_codec:
+                QMessageBox.information(
+                    self,
+                    "No Source Codec Selected",
+                    "Choose a source codec to filter before starting the conversion.",
+                )
+                return
+
+            files_to_convert = [
+                path for path in files if self._file_codecs.get(path) == selected_source_codec
+            ]
+            skipped_count = len(files) - len(files_to_convert)
+            if not files_to_convert:
+                QMessageBox.information(
+                    self,
+                    "No Matching Files",
+                    f'No files match the selected source codec "{self._format_source_codec_label(selected_source_codec)}".',
+                )
+                return
+            if skipped_count > 0:
+                QMessageBox.information(
+                    self,
+                    "Skipping Non-Matching Files",
+                    f"Skipping {skipped_count} file(s) that do not match {self._format_source_codec_label(selected_source_codec)}.",
+                )
 
         config = self._build_config()
 
@@ -475,13 +579,13 @@ class ConvertPage(QWidget):
         self._cancel_btn.setVisible(True)
 
         # Show preparing status
-        self._overall_progress.setMaximum(len(files))
+        self._overall_progress.setMaximum(len(files_to_convert))
         self._overall_progress.setValue(0)
 
         self.start_requested.emit()
 
         # Start async job creation (non-blocking)
-        self._conversion_manager.add_files_async(files, config.output_dir)
+        self._conversion_manager.add_files_async(files_to_convert, config.output_dir)
 
     def _on_cancel(self) -> None:
         """Cancel all conversions."""
@@ -600,27 +704,207 @@ class ConvertPage(QWidget):
     # Helpers
     # ------------------------------------------------------------------
 
+    def _normalize_output_codec(self, codec: str) -> str:
+        """Normalize stored output codec values."""
+        codec_map = {
+            "libx264": "h264",
+            "libx265": "hevc",
+        }
+        return codec_map.get(codec, codec)
+
+    def _normalize_source_codec(self, codec: str) -> str:
+        """Normalize source codec values from ffprobe."""
+        normalized = codec.strip().lower()
+        if normalized == "h265":
+            return "hevc"
+        return normalized
+
+    def _get_selected_output_codec(self) -> str:
+        """Get the selected output codec."""
+        return self._codec_combo.currentData() or "h264"
+
+    def _set_selected_output_codec(self, codec: str) -> None:
+        """Set the selected output codec."""
+        normalized = self._normalize_output_codec(codec)
+        index = self._codec_combo.findData(normalized)
+        self._codec_combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _get_selected_source_codec(self) -> Optional[str]:
+        """Get the selected source codec filter."""
+        return self._source_codec_combo.currentData()
+
+    def _format_source_codec_label(self, codec: str) -> str:
+        """Get a user-facing source codec label."""
+        return SOURCE_CODEC_DISPLAY_NAMES.get(codec, codec.upper())
+
+    def _format_hardware_label(self, encoder: HardwareEncoder) -> str:
+        """Get a compact user-facing hardware encoder label."""
+        label_map = {
+            "nvenc": "NVENC",
+            "videotoolbox": "VideoToolbox",
+            "amf": "AMD AMF",
+            "qsv": "Intel Quick Sync",
+        }
+        return label_map.get(encoder.name, encoder.display_name)
+
+    def _is_source_codec_filter_supported(self) -> bool:
+        """Check whether source filtering is supported for the current target."""
+        return self._get_selected_output_codec() in TARGET_CODECS_WITH_SOURCE_FILTER
+
+    def _is_source_codec_filter_active(self) -> bool:
+        """Check whether source filtering should be applied."""
+        return (
+            self._is_source_codec_filter_supported()
+            and self._source_codec_filter_check.isChecked()
+        )
+
+    def _refresh_hardware_options(
+        self, preferred_name: Optional[str], prefer_none: bool
+    ) -> None:
+        """Populate the hardware acceleration combo for the selected codec."""
+        output_codec = self._get_selected_output_codec()
+        compatible_encoders = get_compatible_hardware_encoders(
+            output_codec, self._hardware_encoders
+        )
+
+        self._hw_combo.blockSignals(True)
+        self._hw_combo.clear()
+        self._hw_combo.addItem("None", None)
+        for encoder in compatible_encoders:
+            self._hw_combo.addItem(self._format_hardware_label(encoder), encoder.name)
+
+        selected_index = 0
+        if preferred_name:
+            preferred_index = self._hw_combo.findData(preferred_name)
+            if preferred_index >= 0:
+                selected_index = preferred_index
+            elif not prefer_none and compatible_encoders:
+                selected_index = 1
+        elif compatible_encoders and not prefer_none:
+            selected_index = 1
+
+        self._hw_combo.setCurrentIndex(selected_index)
+        self._hw_combo.setEnabled(bool(compatible_encoders))
+        self._hw_combo.blockSignals(False)
+
+    def _refresh_source_codec_scan(self) -> None:
+        """Probe the current file list and extract source codec options."""
+        self._cancel_source_codec_scan()
+
+        current_paths = self._file_list.get_file_paths()
+        self._file_codecs = {
+            path: codec for path, codec in self._file_codecs.items() if path in current_paths
+        }
+
+        if not current_paths:
+            self._refresh_source_codec_combo()
+            self._update_source_filter_controls()
+            return
+
+        self._codec_probe_request_id += 1
+        request_id = self._codec_probe_request_id
+        self._set_source_codec_placeholder("Scanning file codecs...")
+        self._update_source_filter_controls()
+
+        worker = FFprobeWorker(
+            current_paths,
+            trash_zero_byte_files=False,
+            parent=self,
+        )
+        self._codec_probe_worker = worker
+        worker.completed.connect(
+            lambda results, rid=request_id, active_worker=worker: self._on_source_codec_scan_completed(
+                rid, active_worker, results
+            )
+        )
+        worker.error.connect(
+            lambda file_path, error, rid=request_id: self._on_source_codec_scan_error(
+                rid, file_path, error
+            )
+        )
+        worker.start()
+
+    def _cancel_source_codec_scan(self) -> None:
+        """Cancel any in-progress source codec probe."""
+        if self._codec_probe_worker is not None:
+            self._codec_probe_worker.cancel()
+            self._codec_probe_worker.deleteLater()
+            self._codec_probe_worker = None
+
+    def _set_source_codec_placeholder(self, text: str) -> None:
+        """Show a disabled placeholder entry in the source codec combo."""
+        self._source_codec_combo.blockSignals(True)
+        self._source_codec_combo.clear()
+        self._source_codec_combo.addItem(text, None)
+        self._source_codec_combo.setCurrentIndex(0)
+        self._source_codec_combo.blockSignals(False)
+
+    def _refresh_source_codec_combo(self) -> None:
+        """Refresh the source codec combo from the latest probe results."""
+        preferred_codec = self._normalize_source_codec(
+            self._config_service.get("convert.source_codec_filter", "")
+        )
+        unique_codecs = sorted(set(self._file_codecs.values()))
+
+        self._source_codec_combo.blockSignals(True)
+        self._source_codec_combo.clear()
+        for codec in unique_codecs:
+            self._source_codec_combo.addItem(
+                self._format_source_codec_label(codec), codec
+            )
+
+        if unique_codecs:
+            index = self._source_codec_combo.findData(preferred_codec)
+            self._source_codec_combo.setCurrentIndex(index if index >= 0 else 0)
+        self._source_codec_combo.blockSignals(False)
+
+    def _update_source_filter_controls(self) -> None:
+        """Update enabled state for source filtering controls."""
+        has_source_codecs = self._source_codec_combo.count() > 0 and (
+            self._source_codec_combo.itemData(0) is not None
+        )
+        filter_supported = self._is_source_codec_filter_supported()
+        can_enable_filter = filter_supported and has_source_codecs
+
+        self._source_codec_filter_check.setEnabled(can_enable_filter)
+        self._source_codec_combo.setEnabled(
+            can_enable_filter and self._source_codec_filter_check.isChecked()
+        )
+
+    def _on_source_codec_scan_completed(
+        self, request_id: int, worker: FFprobeWorker, results: List[object]
+    ) -> None:
+        """Handle completion of source codec probing."""
+        worker.deleteLater()
+        if request_id != self._codec_probe_request_id:
+            return
+
+        if self._codec_probe_worker is worker:
+            self._codec_probe_worker = None
+
+        current_paths = set(self._file_list.get_file_paths())
+        self._file_codecs = {}
+        for metadata in results:
+            file_path = getattr(metadata, "file_path", None)
+            codec = getattr(metadata, "codec", "")
+            if file_path and file_path in current_paths and codec:
+                self._file_codecs[file_path] = self._normalize_source_codec(codec)
+
+        self._refresh_source_codec_combo()
+        self._update_source_filter_controls()
+
+    def _on_source_codec_scan_error(
+        self, request_id: int, file_path: str, error: str
+    ) -> None:
+        """Log source codec scan failures without interrupting the UI."""
+        if request_id != self._codec_probe_request_id:
+            return
+        logger.warning("Codec probe failed for %s: %s", file_path, error)
+
     def _build_config(self) -> ConversionConfig:
         """Build a ConversionConfig from the current UI state."""
-        idx = self._codec_combo.currentIndex()
-        # Indices: 0=H.264, 1=H.265, 2=VP9/webm, 3=mp3, 4=aac, 5=flac
-        codec_map = {
-            0: "h264",
-            1: "hevc",
-            2: "vp9",
-            3: "mp3",
-            4: "aac",
-            5: "flac",
-        }
-        codec = codec_map.get(idx, "h264")
-
-        hw_text = self._hw_combo.currentText()
-        hw_name_map = {
-            "NVENC": "nvenc",
-            "VideoToolbox": "videotoolbox",
-            "VAAPI": "vaapi",
-        }
-        hw_encoder = hw_name_map.get(hw_text) if hw_text != "None" else None
+        codec = self._get_selected_output_codec()
+        hw_encoder = self._hw_combo.currentData()
         use_hw = hw_encoder is not None
 
         return ConversionConfig(
@@ -638,6 +922,12 @@ class ConvertPage(QWidget):
         self._codec_combo.setEnabled(enabled)
         self._crf_slider.setEnabled(enabled)
         self._preset_combo.setEnabled(enabled)
-        self._hw_combo.setEnabled(enabled)
+        if enabled:
+            self._hw_combo.setEnabled(self._hw_combo.count() > 1)
+            self._update_source_filter_controls()
+        else:
+            self._hw_combo.setEnabled(False)
+            self._source_codec_filter_check.setEnabled(False)
+            self._source_codec_combo.setEnabled(False)
         self._output_input.setEnabled(enabled)
         self._output_browse_btn.setEnabled(enabled)

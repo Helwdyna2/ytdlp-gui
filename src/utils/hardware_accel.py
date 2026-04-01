@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from .ffmpeg_utils import get_available_encoders, is_hardware_encoder_available
 from .constants import HARDWARE_ENCODERS
@@ -101,6 +101,28 @@ def get_best_hardware_encoder(codec: str = "h264") -> Optional[HardwareEncoder]:
                     return encoder
     
     return None
+
+
+def get_compatible_hardware_encoders(
+    codec: str, encoders: Optional[List[HardwareEncoder]] = None
+) -> List[HardwareEncoder]:
+    """
+    Get hardware encoders compatible with the requested output codec.
+
+    Args:
+        codec: Output codec name such as "h264" or "hevc"
+        encoders: Optional pre-detected encoders to filter
+
+    Returns:
+        List of compatible hardware encoders.
+    """
+    available_encoders = encoders if encoders is not None else get_cached_hardware_encoders()
+
+    if codec == "h264":
+        return [encoder for encoder in available_encoders if encoder.h264_available]
+    if codec == "hevc":
+        return [encoder for encoder in available_encoders if encoder.hevc_available]
+    return []
 
 
 def get_encoder_for_codec(hardware_encoder: Optional[HardwareEncoder], 

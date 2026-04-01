@@ -51,6 +51,7 @@ class FFprobeWorker(QThread):
         file_paths: List[str],
         base_folder: Optional[str] = None,
         max_workers: Optional[int] = None,
+        trash_zero_byte_files: bool = True,
         parent=None,
     ):
         """
@@ -60,12 +61,14 @@ class FFprobeWorker(QThread):
             file_paths: List of video file paths to probe
             base_folder: Base folder for calculating relative paths (optional)
             max_workers: Number of concurrent ffprobe processes (default: auto-detect based on CPU)
+            trash_zero_byte_files: Whether zero-byte files should be moved to trash
             parent: Parent QObject
         """
         super().__init__(parent)
         self._file_paths = file_paths
         self._base_folder = Path(base_folder) if base_folder else None
         self._max_workers = max_workers or DEFAULT_MAX_WORKERS
+        self._trash_zero_byte_files = trash_zero_byte_files
         self._cancelled = False
         self._progress_lock = Lock()
         self._completed_count = 0
@@ -211,6 +214,8 @@ class FFprobeWorker(QThread):
         # Check for zero-byte files and move to trash
         if is_zero_byte_file(file_path):
             logger.warning(f"Zero-byte file detected: {file_path}")
+            if not self._trash_zero_byte_files:
+                raise ValueError(f"Zero-byte file cannot be probed: {file_path}")
             if move_to_trash(file_path):
                 logger.info(f"Moved zero-byte file to trash: {file_path}")
                 raise ValueError(f"Zero-byte file moved to trash: {file_path}")
