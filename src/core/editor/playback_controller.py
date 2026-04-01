@@ -63,6 +63,7 @@ class PlaybackController(QObject):
         self._get_proc_callback: Optional[GetProcAddressCallback] = None
         self._gl_init_params: Optional[MpvOpenGLInitParams] = None
         self._initialization_attempted = False
+        self._initialize_client()
 
     def _ensure_initialized(self) -> bool:
         if self.is_available():

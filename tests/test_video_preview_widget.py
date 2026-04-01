@@ -8,7 +8,8 @@ def test_preview_starts_dormant_until_backend_init(qapp, qtbot):
     qtbot.addWidget(widget)
 
     assert widget._availability_label.text() == (
-        "Load a video to initialize preview playback and scrub controls."
+        "Preview playback is unavailable because libmpv could not be initialized.\n"
+        "You can still load files, split segments, and export enabled ranges."
     )
 
 

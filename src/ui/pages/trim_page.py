@@ -1087,12 +1087,9 @@ class TrimPage(QWidget):
     def cleanup(self) -> None:
         """Release resources (call before closing)."""
         self._save_quick_session_now()
-        self._cancel_analysis_jobs()
+        self._cancel_analysis_jobs(wait=True)
         if self._video_preview is not None:
             self._video_preview.cleanup()
-        if self._ffprobe_worker is not None:
-            self._ffprobe_worker.deleteLater()
-            self._ffprobe_worker = None
 
     def _refresh_editor_ui(self) -> None:
         """Re-sync editor controls from the in-memory session."""
@@ -1299,8 +1296,18 @@ class TrimPage(QWidget):
                 else ""
             )
 
-    def _cancel_analysis_jobs(self) -> None:
+    def _cancel_analysis_jobs(self, wait: bool = False) -> None:
         if self._ffprobe_worker is not None and self._ffprobe_worker.isRunning():
             self._ffprobe_worker.cancel()
+            if wait:
+                self._ffprobe_worker.wait(5000)
+        if self._ffprobe_worker is not None and not self._ffprobe_worker.isRunning():
+            self._ffprobe_worker.deleteLater()
+            self._ffprobe_worker = None
         if self._keyframe_worker is not None and self._keyframe_worker.isRunning():
             self._keyframe_worker.requestInterruption()
+            if wait:
+                self._keyframe_worker.wait(5000)
+        if self._keyframe_worker is not None and not self._keyframe_worker.isRunning():
+            self._keyframe_worker.deleteLater()
+            self._keyframe_worker = None

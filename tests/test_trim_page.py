@@ -87,3 +87,62 @@ def test_trim_page_progress_section_exists(qapp):
     from PyQt6.QtWidgets import QProgressBar
     page = TrimPage()
     assert isinstance(page._progress_bar, QProgressBar)
+
+
+def test_trim_page_cleanup_waits_for_analysis_workers(qapp, monkeypatch):
+    from src.ui.pages.trim_page import TrimPage
+
+    class _FakePreview:
+        def __init__(self):
+            self.cleanup_calls = 0
+
+        def cleanup(self):
+            self.cleanup_calls += 1
+
+    class _FakeWorker:
+        def __init__(self, running=True):
+            self.running = running
+            self.cancel_calls = 0
+            self.interruption_calls = 0
+            self.wait_calls = []
+            self.delete_later_calls = 0
+
+        def isRunning(self):
+            return self.running
+
+        def cancel(self):
+            self.cancel_calls += 1
+
+        def requestInterruption(self):
+            self.interruption_calls += 1
+            self.running = False
+
+        def wait(self, timeout):
+            self.wait_calls.append(timeout)
+            self.running = False
+            return True
+
+        def deleteLater(self):
+            self.delete_later_calls += 1
+
+    page = TrimPage()
+    preview = _FakePreview()
+    ffprobe_worker = _FakeWorker()
+    keyframe_worker = _FakeWorker()
+
+    page._video_preview = preview
+    page._ffprobe_worker = ffprobe_worker
+    page._keyframe_worker = keyframe_worker
+    monkeypatch.setattr(page, "_save_quick_session_now", lambda: None)
+
+    page.cleanup()
+
+    assert preview.cleanup_calls == 1
+    assert ffprobe_worker.cancel_calls == 1
+    assert ffprobe_worker.wait_calls == [5000]
+    assert ffprobe_worker.delete_later_calls == 1
+    assert keyframe_worker.interruption_calls == 1
+    assert keyframe_worker.wait_calls == [5000]
+    assert keyframe_worker.delete_later_calls == 1
+    assert page._ffprobe_worker is None
+    assert page._keyframe_worker is None

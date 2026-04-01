@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -20,6 +21,7 @@ class KeyframeProbeWorker(QThread):
     def __init__(self, file_path: str, parent=None):
         super().__init__(parent)
         self._file_path = file_path
+        self._process: Optional[subprocess.Popen[str]] = None
 
     def run(self) -> None:
         ffprobe_path = find_ffprobe()
@@ -44,20 +46,35 @@ class KeyframeProbeWorker(QThread):
         ]
 
         try:
-            result = subprocess.run(
+            self._process = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=60,
                 **get_subprocess_kwargs(),
             )
-            if result.returncode != 0:
-                self.failed.emit(result.stderr.strip() or "ffprobe keyframe scan failed")
+            while True:
+                try:
+                    stdout, stderr = self._process.communicate(timeout=0.2)
+                    break
+                except subprocess.TimeoutExpired:
+                    if not self.isInterruptionRequested():
+                        continue
+                    self._process.terminate()
+                    try:
+                        self._process.communicate(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        self._process.kill()
+                        self._process.communicate()
+                    return
+
+            if self._process.returncode != 0:
+                self.failed.emit(stderr.strip() or "ffprobe keyframe scan failed")
                 return
 
-            payload = json.loads(result.stdout or "{}")
+            payload = json.loads(stdout or "{}")
             frames = payload.get("frames", [])
             timestamps: list[float] = []
             for frame in frames:
@@ -72,3 +89,5 @@ class KeyframeProbeWorker(QThread):
             self.completed.emit(sorted(set(timestamps)))
         except Exception as exc:
             self.failed.emit(str(exc))
+        finally:
+            self._process = None
