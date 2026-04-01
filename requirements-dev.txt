@@ -7,12 +7,12 @@
 -r requirements.txt
 
 # Testing
-pytest==8.3.4
-pytest-qt==4.4.0
-pytest-cov==6.0.0
+pytest
+pytest-qt
+pytest-cov
 
 # Type checking
-mypy==1.14.1
+mypy
 
 # Build
-pyinstaller==6.11.1
+pyinstaller

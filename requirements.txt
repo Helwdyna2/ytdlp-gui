@@ -7,16 +7,16 @@
 # - Update periodically to latest stable releases for security and features
 
 # Core framework
-PyQt6>=6.7.0
+PyQt6
 
 # Video downloading
-yt-dlp>=2024.4.9
+yt-dlp
 
 # Browser automation (URL extraction, auth)
-playwright>=1.42.0
+playwright
 
 # Safe file deletion
-send2trash>=1.8.2
+send2trash
 
 # Icon fonts for Qt
-qtawesome>=6.6.0
+qtawesome
