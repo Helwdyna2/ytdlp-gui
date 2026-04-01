@@ -128,6 +128,32 @@ def fake_ffprobe_worker(monkeypatch, convert_page_module):
 
 
 @pytest.fixture
+def fake_folder_scan_worker(monkeypatch, convert_page_module):
+    class FakeFolderScanWorker(QObject):
+        progress = pyqtSignal(int, str)
+        completed = pyqtSignal(list)
+        error = pyqtSignal(str)
+
+        instances = []
+
+        def __init__(self, folder, recursive=True, parent=None):
+            super().__init__(parent)
+            self.folder = folder
+            self.recursive = recursive
+            self.started = False
+            type(self).instances.append(self)
+
+        def start(self):
+            self.started = True
+
+    monkeypatch.setattr(
+        convert_page_module, "FolderScanWorker", FakeFolderScanWorker
+    )
+    FakeFolderScanWorker.instances = []
+    return FakeFolderScanWorker
+
+
+@pytest.fixture
 def fake_conversion_manager(monkeypatch, convert_page_module):
     class FakeConversionManager(QObject):
         job_started = pyqtSignal(int)
@@ -382,6 +408,37 @@ def test_convert_page_starts_disabled_until_preflight_completes(
     assert page._start_btn.isEnabled() is True
 
 
+def test_file_list_widget_emits_loading_state_when_folder_scan_starts(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_folder_scan_worker,
+    convert_page_module,
+):
+    from src.ui.pages.convert_page import FileListWidget
+
+    states = []
+
+    monkeypatch.setattr(
+        convert_page_module.QFileDialog,
+        "getExistingDirectory",
+        lambda *args, **kwargs: "/tmp/library",
+    )
+    monkeypatch.setattr(
+        convert_page_module, "update_dialog_last_dir", lambda *args, **kwargs: None
+    )
+
+    widget = FileListWidget()
+    widget.loading_state_changed.connect(states.append)
+
+    widget._on_add_folder()
+    qapp.processEvents()
+
+    assert states == [True]
+    assert fake_folder_scan_worker.instances[-1].started is True
+
+
 def test_convert_page_filter_off_queues_all_files(
     qapp,
     monkeypatch,
@@ -405,6 +462,34 @@ def test_convert_page_filter_off_queues_all_files(
 
     manager = fake_conversion_manager.instances[-1]
     assert manager.added_files == ["/tmp/a.mp4", "/tmp/b.webm"]
+
+
+def test_convert_page_skip_status_refreshes_for_toggle_and_resolution(
+    qapp, monkeypatch, fake_config_service, fake_ffprobe_worker, convert_page_module
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/a.mp4": {"codec": "h264", "width": 1920, "height": 1080},
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/a.mp4"])
+    qapp.processEvents()
+
+    assert page._preflight_status_label.text() == "Ready to convert 1 file(s)."
+
+    page._source_codec_filter_check.setChecked(True)
+    qapp.processEvents()
+
+    assert "will be skipped" in page._preflight_status_label.text()
+
+    resolution_index = page._resolution_combo.findText("1280x720")
+    page._resolution_combo.setCurrentIndex(resolution_index)
+    qapp.processEvents()
+
+    assert page._preflight_status_label.text() == "Ready to convert 1 file(s)."
 
 
 def test_convert_page_skip_matching_output_queues_only_non_matching_files(

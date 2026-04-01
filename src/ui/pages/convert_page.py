@@ -178,6 +178,7 @@ class FileListWidget(QWidget):
 
             # Start background scan
             self._scan_worker = FolderScanWorker(folder, recursive=True)
+            self._update_loading_state()
             self._scan_worker.progress.connect(self._on_scan_progress)
             self._scan_worker.completed.connect(self._on_scan_completed)
             self._scan_worker.error.connect(self._on_scan_error)
@@ -550,10 +551,14 @@ class ConvertPage(QWidget):
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._crf_slider.valueChanged.connect(self._on_crf_changed)
         self._codec_combo.currentIndexChanged.connect(self._on_output_codec_changed)
-        self._resolution_combo.currentIndexChanged.connect(self._on_settings_changed)
+        self._resolution_combo.currentIndexChanged.connect(
+            self._on_resolution_changed
+        )
         self._preset_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._hw_combo.currentIndexChanged.connect(self._on_settings_changed)
-        self._source_codec_filter_check.toggled.connect(self._on_settings_changed)
+        self._source_codec_filter_check.toggled.connect(
+            self._on_skip_matching_output_toggled
+        )
         self._output_input.textChanged.connect(self._on_settings_changed)
         self._output_input.textChanged.connect(self._update_preview)
         self._output_browse_btn.clicked.connect(self._on_browse_output)
@@ -651,6 +656,16 @@ class ConvertPage(QWidget):
         self._update_preview()
         self._update_start_button_state()
         self._on_settings_changed()
+
+    def _on_resolution_changed(self) -> None:
+        """Refresh queue readiness when the output resolution changes."""
+        self._on_settings_changed()
+        self._update_start_button_state()
+
+    def _on_skip_matching_output_toggled(self) -> None:
+        """Refresh queue readiness when skip-matching is toggled."""
+        self._on_settings_changed()
+        self._update_start_button_state()
 
     def _on_settings_changed(self) -> None:
         """Save settings on any change."""
@@ -1008,7 +1023,15 @@ class ConvertPage(QWidget):
             return False
 
         if output_codec in {"h264", "hevc", "vp9"}:
-            return self._file_codecs.get(file_path) == output_codec
+            if self._file_codecs.get(file_path) != output_codec:
+                return False
+
+            selected_resolution = self._get_selected_resolution()
+            if selected_resolution == SAME_AS_SOURCE_RESOLUTION:
+                return True
+
+            metadata = self._file_metadata.get(file_path)
+            return metadata is not None and metadata.resolution == selected_resolution
 
         return True
 
