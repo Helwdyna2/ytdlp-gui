@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 
@@ -26,6 +26,29 @@ class EditorSegment:
     def display_label(self, index: int) -> str:
         """Return a stable fallback label for UI display."""
         return self.label.strip() or f"Segment {index + 1}"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the segment for project/session persistence."""
+        return {
+            "id": self.id,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "enabled": self.enabled,
+            "label": self.label,
+            "tags": list(self.tags),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "EditorSegment":
+        """Restore a segment from persisted JSON data."""
+        return cls(
+            id=str(data.get("id") or uuid4().hex),
+            start_time=float(data.get("start_time", 0.0)),
+            end_time=float(data.get("end_time", 0.0)),
+            enabled=bool(data.get("enabled", True)),
+            label=str(data.get("label", "")),
+            tags=[str(tag).strip() for tag in data.get("tags", []) if str(tag).strip()],
+        )
 
 
 @dataclass(slots=True)
@@ -51,6 +74,29 @@ class EditorSession:
         self.duration = clean_duration
         self.segments = [EditorSegment(start_time=0.0, end_time=clean_duration)]
         self.selected_segment_id = self.segments[0].id if self.segments else None
+
+    def load_snapshot(self, snapshot: dict[str, Any]) -> None:
+        """Restore the session from serialized JSON state."""
+        source_path = snapshot.get("source_path")
+        duration = float(snapshot.get("duration", 0.0))
+        raw_segments = snapshot.get("segments", [])
+
+        self.source_path = str(source_path) if source_path else None
+        self.duration = max(0.0, duration)
+        self.segments = [EditorSegment.from_dict(item) for item in raw_segments]
+        self.selected_segment_id = snapshot.get("selected_segment_id")
+
+        if self.selected_segment is None and self.segments:
+            self.selected_segment_id = self.segments[0].id
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the session for project/session persistence."""
+        return {
+            "source_path": self.source_path,
+            "duration": self.duration,
+            "selected_segment_id": self.selected_segment_id,
+            "segments": [segment.to_dict() for segment in self.segments],
+        }
 
     @property
     def has_source(self) -> bool:
@@ -161,6 +207,16 @@ class EditorSession:
         if segment is None:
             return None
         segment.label = label.strip()
+        return segment
+
+    def set_segment_tags(
+        self, segment_id: str, tags: list[str] | tuple[str, ...]
+    ) -> Optional[EditorSegment]:
+        """Replace the segment's tags with a cleaned list."""
+        segment = self.get_segment(segment_id)
+        if segment is None:
+            return None
+        segment.tags = [tag.strip() for tag in tags if tag.strip()]
         return segment
 
     def enabled_segments(self) -> list[EditorSegment]:

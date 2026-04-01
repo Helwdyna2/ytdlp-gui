@@ -42,8 +42,8 @@ class SegmentListWidget(QWidget):
         layout.addWidget(self._summary_label)
 
         self._tree = QTreeWidget()
-        self._tree.setColumnCount(3)
-        self._tree.setHeaderLabels(["Segment", "Range", "Label"])
+        self._tree.setColumnCount(4)
+        self._tree.setHeaderLabels(["Segment", "Range", "Label", "Tags"])
         self._tree.setRootIsDecorated(False)
         self._tree.setAlternatingRowColors(True)
         self._tree.setMinimumHeight(220)
@@ -58,6 +58,7 @@ class SegmentListWidget(QWidget):
             header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
             header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
             header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
 
         layout.addWidget(self._tree)
 
@@ -114,6 +115,7 @@ class SegmentListWidget(QWidget):
                     segment.display_label(index),
                     self._format_range(segment.start_time, segment.end_time),
                     segment.label,
+                    ", ".join(segment.tags),
                 ]
             )
             item.setData(0, Qt.ItemDataRole.UserRole, segment.id)

@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, Optional, Set
 
 from send2trash import send2trash
 
@@ -22,14 +22,25 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
 )
 
-from ...core.editor import EditorSession
+from ...core.editor import (
+    EditorDiagnostics,
+    EditorSession,
+    ExportManager,
+    ExportMode,
+    ExportPlanner,
+    KeyframeProbeWorker,
+    ProjectStore,
+    QuickSessionStore,
+)
 from ...core.trim_manager import TrimManager
 from ...core.ffprobe_worker import FFprobeWorker
 from ...data.models import TrimConfig
 from ...services.config_service import ConfigService
 from ...utils.constants import VIDEO_FILE_FILTER
 from ...utils.dialog_utils import get_dialog_start_dir, update_dialog_last_dir
+from ..components.activity_drawer import ActivityDrawer
 from ..components.data_panel import DataPanel
+from ..components.log_feed import LogFeed
 from ..components.page_header import PageHeader
 from ..components.split_layout import SplitLayout
 from ..widgets.segment_list_widget import SegmentListWidget
@@ -70,18 +81,33 @@ class TrimPage(QWidget):
         self._trim_timeline = trim_timeline or TrimTimelineWidget()
         self._config_service = ConfigService()
         self._editor_session = EditorSession()
+        self._export_planner = ExportPlanner()
+        self._export_manager = ExportManager(self)
+        self._project_store = ProjectStore()
+        self._quick_session_store = QuickSessionStore()
+        self._diagnostics = EditorDiagnostics(self)
         self._syncing_editor_ui = False
         self._is_running = False
+        self._current_project_path: Optional[str] = None
 
         # Runtime state
         self._current_path: Optional[str] = None
         self._successfully_trimmed_originals: Set[str] = set()
         self._job_id_to_input_path: Dict[int, str] = {}
         self._ffprobe_worker = None
+        self._keyframe_worker: Optional[KeyframeProbeWorker] = None
+        self._source_metadata: dict = {}
+        self._source_probe_payload: dict = {}
+        self._keyframe_times: list[float] = []
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(600)
 
         self._setup_ui()
         self._connect_signals()
         self._load_settings()
+        self._autosave_timer.timeout.connect(self._save_quick_session_now)
+        self._restore_quick_session_if_enabled()
 
     # ------------------------------------------------------------------ #
     #  UI construction                                                     #
@@ -119,6 +145,14 @@ class TrimPage(QWidget):
         self._load_video_btn = QPushButton("Load Video")
         self._load_video_btn.setObjectName("btnWire")
         mode_row.addWidget(self._load_video_btn)
+
+        self._load_project_btn = QPushButton("Load Project")
+        self._load_project_btn.setObjectName("btnWire")
+        mode_row.addWidget(self._load_project_btn)
+
+        self._save_project_btn = QPushButton("Save Project")
+        self._save_project_btn.setObjectName("btnWire")
+        mode_row.addWidget(self._save_project_btn)
 
         main_layout.addLayout(mode_row)
 
@@ -201,6 +235,15 @@ class TrimPage(QWidget):
         label_row.addWidget(self._segment_label_input, stretch=1)
         self._segment_panel.body_layout.addLayout(label_row)
 
+        tags_row = QHBoxLayout()
+        tags_row.setSpacing(8)
+        tags_row.addWidget(QLabel("Tags"))
+        self._segment_tags_input = QLineEdit()
+        self._segment_tags_input.setPlaceholderText("Comma-separated tags")
+        self._segment_tags_input.setEnabled(False)
+        tags_row.addWidget(self._segment_tags_input, stretch=1)
+        self._segment_panel.body_layout.addLayout(tags_row)
+
         self._segment_list = SegmentListWidget()
         self._segment_list.setEnabled(False)
         self._segment_panel.body_layout.addWidget(self._segment_list, stretch=1)
@@ -218,6 +261,15 @@ class TrimPage(QWidget):
         )
         self._export_panel.body_layout.addWidget(self._lossless_checkbox)
 
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(8)
+        mode_row.addWidget(QLabel("Mode"))
+        self._export_mode_combo = QComboBox()
+        self._export_mode_combo.addItem("Separate Outputs", ExportMode.SEPARATE.value)
+        self._export_mode_combo.addItem("Merged Output", ExportMode.MERGED.value)
+        mode_row.addWidget(self._export_mode_combo, stretch=1)
+        self._export_panel.body_layout.addLayout(mode_row)
+
         output_row = QHBoxLayout()
         output_row.setSpacing(8)
         output_row.addWidget(QLabel("Output"))
@@ -230,6 +282,12 @@ class TrimPage(QWidget):
         self._output_browse_btn.setObjectName("btnWire")
         output_row.addWidget(self._output_browse_btn)
         self._export_panel.body_layout.addLayout(output_row)
+
+        self._warning_label = QLabel("")
+        self._warning_label.setObjectName("dimLabel")
+        self._warning_label.setVisible(False)
+        self._warning_label.setWordWrap(True)
+        self._export_panel.body_layout.addWidget(self._warning_label)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
@@ -262,6 +320,11 @@ class TrimPage(QWidget):
         self._export_panel.body_layout.addWidget(self._status_label)
         right_layout.addWidget(self._export_panel, stretch=2)
 
+        self._activity_drawer = ActivityDrawer("Editor Activity")
+        self._activity_log = LogFeed(max_entries=150)
+        self._activity_drawer.set_content_widget(self._activity_log)
+        right_layout.addWidget(self._activity_drawer, stretch=2)
+
     # ------------------------------------------------------------------ #
     #  Signal wiring                                                       #
     # ------------------------------------------------------------------ #
@@ -273,12 +336,15 @@ class TrimPage(QWidget):
 
         # Load video button
         self._load_video_btn.clicked.connect(self._on_load_video)
+        self._load_project_btn.clicked.connect(self._on_load_project)
+        self._save_project_btn.clicked.connect(self._on_save_project)
 
         # Time control buttons
         self._set_start_btn.clicked.connect(self._on_set_start)
         self._set_end_btn.clicked.connect(self._on_set_end)
         self._start_input.editingFinished.connect(self._sync_inputs_to_session)
         self._end_input.editingFinished.connect(self._sync_inputs_to_session)
+        self._segment_tags_input.editingFinished.connect(self._on_segment_tags_edited)
 
         # Output browse
         self._output_browse_btn.clicked.connect(self._on_browse_output)
@@ -295,6 +361,9 @@ class TrimPage(QWidget):
         # Persist settings on change
         self._lossless_checkbox.stateChanged.connect(self._save_settings)
         self._output_input.textChanged.connect(self._save_settings)
+        self._lossless_checkbox.stateChanged.connect(self._schedule_autosave)
+        self._output_input.textChanged.connect(self._schedule_autosave)
+        self._export_mode_combo.currentIndexChanged.connect(self._on_export_mode_changed)
 
         # Wire injected preview widget
         if self._video_preview is not None:
@@ -309,6 +378,17 @@ class TrimPage(QWidget):
         self._segment_list.segment_selected.connect(self._on_segment_selected)
         self._segment_list.segment_toggled.connect(self._on_segment_toggled)
         self._segment_list.segment_label_changed.connect(self._on_segment_label_changed)
+
+        self._export_manager.started.connect(self._on_export_started)
+        self._export_manager.progress.connect(self._on_export_progress)
+        self._export_manager.log.connect(self._on_export_log)
+        self._export_manager.completed.connect(self._on_export_completed)
+
+        self._diagnostics.entry_added.connect(
+            lambda level, message: self._activity_log.add_entry(message, level)
+        )
+        self._diagnostics.entry_added.connect(lambda *_: self._update_activity_badge())
+        self._diagnostics.cleared.connect(self._activity_log.clear)
 
         # Wire injected TrimManager if provided at construction
         if self._trim_manager is not None:
@@ -338,12 +418,35 @@ class TrimPage(QWidget):
         output_dir = self._config_service.get("trim.single_output_dir", "")
         self._output_input.setText(output_dir)
 
+        export_mode = self._config_service.get("trim.single_export_mode", "separate")
+        index = self._export_mode_combo.findData(export_mode)
+        self._export_mode_combo.setCurrentIndex(max(index, 0))
+        self._sync_output_placeholder()
+
     def _save_settings(self) -> None:
         """Persist current settings."""
         self._config_service.set(
             "trim.single_lossless", self._lossless_checkbox.isChecked()
         )
         self._config_service.set("trim.single_output_dir", self._output_input.text())
+        self._config_service.set(
+            "trim.single_export_mode",
+            self._export_mode_combo.currentData(),
+        )
+
+    def _export_mode(self) -> ExportMode:
+        value = self._export_mode_combo.currentData() or ExportMode.SEPARATE.value
+        return ExportMode(value)
+
+    def _sync_output_placeholder(self) -> None:
+        if self._export_mode() == ExportMode.MERGED:
+            self._output_input.setPlaceholderText(
+                "Merged output file (defaults next to source)"
+            )
+        else:
+            self._output_input.setPlaceholderText(
+                "Output folder (defaults to source folder)"
+            )
 
     # ------------------------------------------------------------------ #
     #  UI event handlers                                                   #
@@ -353,10 +456,18 @@ class TrimPage(QWidget):
         """Handle mode combo change."""
         is_single = index == self._MODE_SINGLE
         self._load_video_btn.setVisible(is_single)
+        self._load_project_btn.setVisible(is_single)
+        self._save_project_btn.setVisible(is_single)
         self._preview_panel.setVisible(is_single)
         self._timeline_panel.setVisible(is_single)
         self._segment_panel.setVisible(is_single)
+        self._activity_drawer.setVisible(is_single)
         self._apply_editor_control_state()
+
+    def _on_export_mode_changed(self, _index: int = 0) -> None:
+        self._sync_output_placeholder()
+        self._save_settings()
+        self._schedule_autosave()
 
     def _on_load_video(self) -> None:
         """Open a file dialog and load the selected video."""
@@ -368,40 +479,129 @@ class TrimPage(QWidget):
             update_dialog_last_dir(file)
             self._load_video(file)
 
+    def _on_load_project(self) -> None:
+        """Restore a saved project JSON file."""
+        start_dir = get_dialog_start_dir("", "dialogs.last_dir")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Trim Project",
+            start_dir,
+            "Trim Project (*.cutproj.json *.json);;All Files (*)",
+        )
+        if not file_path:
+            return
+
+        update_dialog_last_dir(file_path)
+        try:
+            payload = self._project_store.load(file_path)
+            self._restore_snapshot(
+                payload["session"],
+                export_state=payload.get("export", {}),
+                analysis=payload.get("analysis", {}),
+                project_path=file_path,
+            )
+            self._diagnostics.record("info", f"Loaded project {Path(file_path).name}")
+        except Exception as exc:
+            QMessageBox.warning(self, "Project Load Failed", str(exc))
+            self._diagnostics.record("error", f"Project load failed: {exc}")
+
+    def _on_save_project(self) -> None:
+        """Persist the current editor state as a project JSON file."""
+        if not self._editor_session.has_source:
+            QMessageBox.information(self, "No Project State", "Load a video before saving a project.")
+            return
+
+        start_dir = get_dialog_start_dir("", "dialogs.last_dir")
+        suggested = (
+            f"{Path(self._current_path).stem}.cutproj.json"
+            if self._current_path
+            else "trim-session.cutproj.json"
+        )
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Trim Project",
+            str(Path(start_dir) / suggested),
+            "Trim Project (*.cutproj.json *.json);;All Files (*)",
+        )
+        if not file_path:
+            return
+
+        update_dialog_last_dir(file_path)
+        try:
+            self._project_store.save(
+                file_path,
+                self._editor_session,
+                export_state=self._build_export_state(),
+                analysis=self._build_analysis_state(),
+            )
+            self._current_project_path = file_path
+            self._diagnostics.record("info", f"Saved project {Path(file_path).name}")
+        except Exception as exc:
+            QMessageBox.warning(self, "Project Save Failed", str(exc))
+            self._diagnostics.record("error", f"Project save failed: {exc}")
+
     def _load_video(self, path: str) -> None:
         """Load a video file for preview and trimming."""
+        self._cancel_analysis_jobs()
         self._current_path = path
+        self._current_project_path = None
         self._editor_session.clear()
+        self._source_metadata = {}
+        self._source_probe_payload = {}
+        self._keyframe_times = []
+        self._warning_label.clear()
+        self._warning_label.setVisible(False)
         self._refresh_editor_ui()
 
         # Reset time inputs and timeline
         self._start_input.setText("0.000")
         self._end_input.setText("0.000")
         self._trim_btn.setEnabled(False)
+        self._status_label.setVisible(True)
+        self._status_label.setText(f"Loading {Path(path).name}…")
 
         if self._trim_timeline is not None:
             self._trim_timeline.reset()
+
+        self._probe_source_metadata(path)
 
         # Load into preview widget if available
         if self._video_preview is not None and self._video_preview.is_available():
             self._video_preview.load_video(path)
         else:
-            # Fall back to ffprobe for duration
-            self._probe_duration(path)
+            self._diagnostics.record("warning", "Preview backend unavailable, using ffprobe duration only.")
 
-    def _probe_duration(self, path: str) -> None:
-        """Get video duration via ffprobe when mpv is not available."""
+        self._schedule_autosave()
+
+    def _probe_source_metadata(self, path: str) -> None:
+        """Probe metadata for the loaded source and start keyframe analysis."""
         self._ffprobe_worker = FFprobeWorker([path])
+        self._ffprobe_worker.raw_metadata_ready.connect(self._on_raw_probe_ready)
         self._ffprobe_worker.completed.connect(self._on_probe_completed)
         self._ffprobe_worker.start()
+        self._diagnostics.record("info", f"Probing metadata for {Path(path).name}")
 
     def _on_probe_completed(self, results: list) -> None:
         """Handle ffprobe duration probe completion."""
         if results:
             metadata = results[0]
             duration = metadata.duration
+            self._source_metadata = {
+                "codec": metadata.codec,
+                "duration": metadata.duration,
+                "width": metadata.width,
+                "height": metadata.height,
+                "fps": metadata.fps,
+                "bitrate": metadata.bitrate,
+            }
             if duration > 0:
-                self._on_duration_loaded(duration)
+                if not self._editor_session.has_source:
+                    self._on_duration_loaded(duration)
+                self._diagnostics.record(
+                    "info",
+                    f"Metadata ready: {metadata.codec or 'unknown codec'}, {metadata.width}x{metadata.height}",
+                )
+                self._start_keyframe_probe(self._current_path)
             else:
                 QMessageBox.warning(
                     self, "Cannot Load Video", "Failed to read video duration."
@@ -415,14 +615,52 @@ class TrimPage(QWidget):
             self._ffprobe_worker.deleteLater()
             self._ffprobe_worker = None
 
+    def _on_raw_probe_ready(self, _file_path: str, raw_payload: dict) -> None:
+        """Capture raw ffprobe JSON for later diagnostics/export planning."""
+        self._source_probe_payload = raw_payload or {}
+
+    def _start_keyframe_probe(self, path: Optional[str]) -> None:
+        if not path:
+            return
+        self._keyframe_worker = KeyframeProbeWorker(path, self)
+        self._keyframe_worker.completed.connect(self._on_keyframes_ready)
+        self._keyframe_worker.failed.connect(self._on_keyframe_probe_failed)
+        self._keyframe_worker.start()
+
+    def _on_keyframes_ready(self, keyframe_times: list) -> None:
+        self._keyframe_times = keyframe_times
+        self._diagnostics.record(
+            "info", f"Keyframe map ready ({len(keyframe_times)} positions)."
+        )
+        if self._keyframe_worker is not None:
+            self._keyframe_worker.deleteLater()
+            self._keyframe_worker = None
+        self._schedule_autosave()
+
+    def _on_keyframe_probe_failed(self, message: str) -> None:
+        self._diagnostics.record("warning", f"Keyframe scan skipped: {message}")
+        if self._keyframe_worker is not None:
+            self._keyframe_worker.deleteLater()
+            self._keyframe_worker = None
+
     def _on_duration_loaded(self, duration: float) -> None:
         """Handle video duration loaded from preview or ffprobe."""
         if self._current_path is None:
             return
 
+        if (
+            self._editor_session.source_path == self._current_path
+            and self._editor_session.segments
+        ):
+            self._editor_session.duration = max(duration, self._editor_session.duration)
+            self._refresh_editor_ui()
+            return
+
         self._editor_session.load_source(self._current_path, duration)
         self._refresh_editor_ui()
         self._trim_btn.setEnabled(bool(self._editor_session.enabled_segments()))
+        self._status_label.setText(f"Loaded {Path(self._current_path).name}")
+        self._schedule_autosave()
 
     def _on_position_changed(self, position: float) -> None:
         """Handle playback position change from preview widget."""
@@ -440,6 +678,7 @@ class TrimPage(QWidget):
 
         self._editor_session.update_selected_range(start, end)
         self._refresh_editor_ui()
+        self._schedule_autosave()
 
     def _on_set_start(self) -> None:
         """Set start input to current playback position."""
@@ -468,6 +707,7 @@ class TrimPage(QWidget):
 
         self._editor_session.update_selected_range(start, end)
         self._refresh_editor_ui()
+        self._schedule_autosave()
 
     def _on_split_segment(self) -> None:
         """Split the active segment at the current playhead position."""
@@ -483,6 +723,7 @@ class TrimPage(QWidget):
         self._status_label.setVisible(True)
         self._status_label.setText("Segment split at current position.")
         self._refresh_editor_ui()
+        self._schedule_autosave()
 
     def _on_toggle_segment(self) -> None:
         """Toggle the selected segment's enabled state."""
@@ -490,6 +731,7 @@ class TrimPage(QWidget):
         if segment is None:
             return
         self._refresh_editor_ui()
+        self._schedule_autosave()
 
     def _on_segment_selected(self, segment_id: str) -> None:
         """Sync list selection into the editor session."""
@@ -501,11 +743,13 @@ class TrimPage(QWidget):
         """Handle enabled-state changes from the segment list."""
         self._editor_session.set_segment_enabled(segment_id, enabled)
         self._refresh_editor_ui()
+        self._schedule_autosave()
 
     def _on_segment_label_changed(self, segment_id: str, label: str) -> None:
         """Handle inline label edits from the segment list."""
         self._editor_session.set_segment_label(segment_id, label)
         self._refresh_editor_ui()
+        self._schedule_autosave()
 
     def _on_segment_label_edited(self) -> None:
         """Handle label edits from the inline inspector field."""
@@ -516,6 +760,17 @@ class TrimPage(QWidget):
             segment.id, self._segment_label_input.text()
         )
         self._refresh_editor_ui()
+        self._schedule_autosave()
+
+    def _on_segment_tags_edited(self) -> None:
+        """Handle comma-separated tag edits for the active segment."""
+        segment = self._editor_session.selected_segment
+        if segment is None:
+            return
+        tags = [tag.strip() for tag in self._segment_tags_input.text().split(",")]
+        self._editor_session.set_segment_tags(segment.id, tags)
+        self._refresh_editor_ui()
+        self._schedule_autosave()
 
     def _on_timeline_seek_requested(self, position: float) -> None:
         """Seek the preview player when the timeline requests it."""
@@ -523,21 +778,41 @@ class TrimPage(QWidget):
             self._video_preview.seek(position)
 
     def _on_browse_output(self) -> None:
-        """Browse for output directory."""
-        start_dir = get_dialog_start_dir(
-            self._output_input.text(), "trim.single_output_dir"
-        )
-        folder = QFileDialog.getExistingDirectory(
-            self, "Select Output Folder", start_dir
-        )
-        if folder:
-            update_dialog_last_dir(folder)
-            self._output_input.setText(folder)
+        """Browse for output folder or merged file path."""
+        start_dir = get_dialog_start_dir(self._output_input.text(), "trim.single_output_dir")
+        if self._export_mode() == ExportMode.MERGED:
+            current_source = Path(self._current_path) if self._current_path else Path(start_dir) / "merged.mp4"
+            suggested = self._output_input.text() or str(
+                current_source.with_name(f"{current_source.stem}_merged{current_source.suffix}")
+            )
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Select Merged Output",
+                suggested,
+                VIDEO_FILE_FILTER,
+            )
+            if file_path:
+                update_dialog_last_dir(file_path)
+                self._output_input.setText(file_path)
+        else:
+            folder = QFileDialog.getExistingDirectory(
+                self, "Select Output Folder", start_dir
+            )
+            if folder:
+                update_dialog_last_dir(folder)
+                self._output_input.setText(folder)
 
     def _on_trim(self) -> None:
         """Validate inputs and start trim operation."""
         if not self._current_path:
             QMessageBox.warning(self, "No Video", "Please load a video file first.")
+            return
+        if not Path(self._current_path).exists():
+            QMessageBox.warning(
+                self,
+                "Source Missing",
+                "The saved source file is missing. Load or relink the source media first.",
+            )
             return
 
         enabled_segments = self._editor_session.enabled_segments()
@@ -550,36 +825,38 @@ class TrimPage(QWidget):
             return
 
         lossless = self._lossless_checkbox.isChecked()
-        output_dir = self._output_input.text() or None
-        duration = self._editor_session.duration or (
-            self._trim_timeline.get_duration() if self._trim_timeline is not None else 0.0
-        )
+        output_target = self._output_input.text().strip() or None
 
-        trim_ranges = [
-            (segment.start_time, segment.end_time, duration)
-            for segment in enabled_segments
-        ]
-        output_path_overrides = self._build_output_paths(
-            self._current_path,
-            output_dir,
-            len(trim_ranges),
-        )
+        try:
+            plan = self._export_planner.build_plan(
+                self._editor_session,
+                mode=self._export_mode(),
+                lossless=lossless,
+                output_target=output_target,
+                keyframe_times=self._keyframe_times,
+                source_metadata=self._source_metadata,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Cannot Export", str(exc))
+            self._diagnostics.record("error", f"Export planning failed: {exc}")
+            return
 
-        self._start_trim(
-            files=[self._current_path] * len(trim_ranges),
-            trim_ranges=trim_ranges,
-            lossless=lossless,
-            output_dir=output_dir,
-            output_path_overrides=output_path_overrides,
-        )
+        self._present_plan_warnings(plan)
+        if plan.requires_confirmation and not self._confirm_export(plan):
+            self._diagnostics.record("warning", "Export cancelled after warning review.")
+            return
+
+        self._export_manager.start(plan)
+        self.trim_requested.emit()
+        self._schedule_autosave()
 
     def _start_trim(
         self,
-        files: List[str],
-        trim_ranges: List[tuple],
+        files,
+        trim_ranges,
         lossless: bool,
         output_dir: Optional[str],
-        output_path_overrides: Optional[List[str]] = None,
+        output_path_overrides=None,
     ) -> None:
         """Create a TrimManager, add jobs, and start processing."""
         # Reset delete-originals tracking
@@ -619,6 +896,66 @@ class TrimPage(QWidget):
 
         # Start
         self._trim_manager.start()
+
+    def _present_plan_warnings(self, plan) -> None:
+        if not plan.warnings:
+            self._warning_label.clear()
+            self._warning_label.setVisible(False)
+            return
+
+        warning_text = "\n".join(f"- {warning.message}" for warning in plan.warnings)
+        self._warning_label.setText(warning_text)
+        self._warning_label.setVisible(True)
+        for warning in plan.warnings:
+            self._diagnostics.record("warning", warning.message)
+
+    def _confirm_export(self, plan) -> bool:
+        warning_text = "\n\n".join(warning.message for warning in plan.warnings)
+        result = QMessageBox.warning(
+            self,
+            "Review Export Warnings",
+            f"{warning_text}\n\nContinue with this export?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return result == QMessageBox.StandardButton.Yes
+
+    def _on_export_started(self) -> None:
+        self._set_running(True)
+        self._progress_bar.setVisible(True)
+        self._status_label.setVisible(True)
+        self._status_label.setText("Starting export…")
+
+    def _on_export_progress(self, percent: float, speed: str, _eta: str) -> None:
+        self._progress_bar.setValue(int(percent))
+        speed_suffix = f" at {speed}" if speed else ""
+        self._status_label.setText(f"Exporting… {percent:.0f}%{speed_suffix}")
+
+    def _on_export_log(self, level: str, message: str) -> None:
+        self._diagnostics.record(level, message)
+
+    def _on_export_completed(self, success: bool, outputs: object, error: str) -> None:
+        self._set_running(False)
+        output_paths = outputs if isinstance(outputs, list) else []
+        if success:
+            count = len(output_paths)
+            self._status_label.setText(f"Done. Exported {count} output(s).")
+            self._diagnostics.record("info", f"Export complete: {count} output(s).")
+            QMessageBox.information(
+                self,
+                "Export Complete",
+                f"Successfully exported {count} output(s).",
+            )
+        else:
+            status = "Cancelled" if "Cancelled" in error else "Failed"
+            self._status_label.setText(f"{status}: {error}" if error else status)
+            self._diagnostics.record("error", f"Export failed: {error or status}")
+            if "Cancelled" not in error:
+                QMessageBox.warning(
+                    self,
+                    "Export Failed",
+                    error or "The export failed.",
+                )
 
     # ------------------------------------------------------------------ #
     #  TrimManager signal handlers                                         #
@@ -687,8 +1024,10 @@ class TrimPage(QWidget):
 
     def _on_cancel(self) -> None:
         """Cancel all running trim jobs."""
+        self._export_manager.cancel()
         if self._trim_manager is not None:
             self._trim_manager.cancel_all()
+        self._diagnostics.record("warning", "Export cancellation requested.")
         self.cancel_requested.emit()
 
     # ------------------------------------------------------------------ #
@@ -700,6 +1039,8 @@ class TrimPage(QWidget):
         self._is_running = running
         self._trim_btn.setEnabled(not running)
         self._load_video_btn.setEnabled(not running)
+        self._load_project_btn.setEnabled(not running)
+        self._save_project_btn.setEnabled(not running)
         self._cancel_btn.setVisible(running)
         self._progress_bar.setVisible(running or not running)  # always show after start
         self._status_label.setVisible(True)
@@ -727,6 +1068,8 @@ class TrimPage(QWidget):
 
     def cleanup(self) -> None:
         """Release resources (call before closing)."""
+        self._save_quick_session_now()
+        self._cancel_analysis_jobs()
         if self._video_preview is not None:
             self._video_preview.cleanup()
         if self._ffprobe_worker is not None:
@@ -749,12 +1092,14 @@ class TrimPage(QWidget):
         if segment is not None:
             self._update_time_inputs(segment.start_time, segment.end_time)
             self._segment_label_input.setText(segment.label)
+            self._segment_tags_input.setText(", ".join(segment.tags))
             self._toggle_segment_btn.setText(
                 "Disable Segment" if segment.enabled else "Enable Segment"
             )
         else:
             self._update_time_inputs(0.0, 0.0)
             self._segment_label_input.clear()
+            self._segment_tags_input.clear()
             self._toggle_segment_btn.setText("Disable Segment")
 
         self._segment_list.set_session(
@@ -794,15 +1139,116 @@ class TrimPage(QWidget):
         has_segments = bool(self._editor_session.segments)
         has_enabled = bool(self._editor_session.enabled_segments())
         is_interactive = not self._is_running and is_single_mode
+        source_exists = bool(self._current_path) and Path(self._current_path).exists()
 
         self._split_btn.setEnabled(is_interactive and has_selection)
         self._toggle_segment_btn.setEnabled(is_interactive and has_selection)
         self._segment_label_input.setEnabled(is_interactive and has_selection)
+        self._segment_tags_input.setEnabled(is_interactive and has_selection)
         self._segment_list.setEnabled(is_interactive and has_segments)
         self._start_input.setEnabled(is_interactive and has_selection)
         self._end_input.setEnabled(is_interactive and has_selection)
         self._set_start_btn.setEnabled(is_interactive and has_selection)
         self._set_end_btn.setEnabled(is_interactive and has_selection)
         self._trim_btn.setEnabled(
-            is_interactive and bool(self._current_path) and has_enabled
+            is_interactive and source_exists and has_enabled
         )
+
+    def _schedule_autosave(self, *_args) -> None:
+        if not self._config_service.get("trim.quick_session_restore", True):
+            return
+        self._autosave_timer.start()
+
+    def _save_quick_session_now(self) -> None:
+        if self._editor_session.has_source:
+            self._quick_session_store.save(
+                self._editor_session,
+                export_state=self._build_export_state(),
+                analysis=self._build_analysis_state(),
+            )
+        else:
+            self._quick_session_store.clear()
+
+    def _restore_quick_session_if_enabled(self) -> None:
+        if not self._config_service.get("trim.quick_session_restore", True):
+            return
+        snapshot = self._quick_session_store.load()
+        if not snapshot:
+            return
+
+        session = snapshot.get("session")
+        if session is None or not session.source_path:
+            return
+
+        self._restore_snapshot(
+            session,
+            export_state=snapshot.get("export", {}),
+            analysis=snapshot.get("analysis", {}),
+            project_path=None,
+        )
+        self._diagnostics.record("info", "Restored the previous Trim session.")
+
+    def _restore_snapshot(
+        self,
+        session: EditorSession,
+        *,
+        export_state: dict,
+        analysis: dict,
+        project_path: Optional[str],
+    ) -> None:
+        self._editor_session = session
+        self._current_path = session.source_path
+        self._current_project_path = project_path
+        self._source_metadata = analysis.get("source_metadata", {})
+        self._source_probe_payload = analysis.get("source_probe_payload", {})
+        self._keyframe_times = analysis.get("keyframe_times", []) or []
+
+        self._lossless_checkbox.setChecked(export_state.get("lossless", True))
+        self._output_input.setText(export_state.get("output_target", ""))
+        mode_value = export_state.get("mode", ExportMode.SEPARATE.value)
+        index = self._export_mode_combo.findData(mode_value)
+        self._export_mode_combo.setCurrentIndex(max(index, 0))
+        self._sync_output_placeholder()
+        self._refresh_editor_ui()
+        self._status_label.setVisible(True)
+
+        if session.source_path and Path(session.source_path).exists():
+            if self._video_preview is not None and self._video_preview.is_available():
+                self._video_preview.load_video(session.source_path)
+        else:
+            self._status_label.setText("Saved source file is missing. Relink by loading the source again.")
+            self._diagnostics.record(
+                "warning",
+                "Saved source file is missing. Load the original media again to restore preview/export.",
+            )
+
+    def _build_export_state(self) -> dict:
+        return {
+            "mode": self._export_mode().value,
+            "lossless": self._lossless_checkbox.isChecked(),
+            "output_target": self._output_input.text().strip(),
+        }
+
+    def _build_analysis_state(self) -> dict:
+        return {
+            "source_metadata": self._source_metadata,
+            "source_probe_payload": self._source_probe_payload,
+            "keyframe_times": self._keyframe_times,
+        }
+
+    def _update_activity_badge(self) -> None:
+        warnings = self._diagnostics.warning_count()
+        if warnings:
+            self._activity_drawer.set_badge_text(f"{warnings} warnings")
+        else:
+            self._activity_drawer.set_badge_text(
+                f"{len(self._diagnostics.entries())} events"
+                if self._diagnostics.entries()
+                else ""
+            )
+
+    def _cancel_analysis_jobs(self) -> None:
+        if self._ffprobe_worker is not None and self._ffprobe_worker.isRunning():
+            self._ffprobe_worker.cancel()
+        if self._keyframe_worker is not None and self._keyframe_worker.isRunning():
+            self._keyframe_worker.requestInterruption()

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QMessageBox, QCheckBox
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QSurfaceFormat
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
 from .utils.platform_utils import ensure_dirs, get_log_dir
@@ -228,6 +229,15 @@ def main():
     logger = logging.getLogger(__name__)
 
     try:
+        surface_format = QSurfaceFormat()
+        surface_format.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
+        surface_format.setSwapBehavior(QSurfaceFormat.SwapBehavior.DoubleBuffer)
+        surface_format.setDepthBufferSize(24)
+        surface_format.setStencilBufferSize(8)
+        surface_format.setVersion(3, 2)
+        surface_format.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+        QSurfaceFormat.setDefaultFormat(surface_format)
+
         # Create Qt application with single-instance support
         app = SingleApplication(sys.argv)
         app.setApplicationName(APP_NAME)
