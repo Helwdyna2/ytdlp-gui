@@ -269,7 +269,7 @@ def main():
         app.setApplicationVersion(APP_VERSION)
 
         # Apply the Signal Deck theme
-        theme_engine = ThemeEngine()
+        theme_engine = ThemeEngine.instance()
         theme_engine.apply_theme(app)
 
         # Check if this is the primary instance

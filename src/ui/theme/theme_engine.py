@@ -52,19 +52,16 @@ class ThemeEngine(QObject):
     _instance: Optional["ThemeEngine"] = None
     _fonts_loaded: bool = False
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-
     def __init__(self):
-        if self._initialized:
-            return
         super().__init__()
-        self._initialized = True
         self._current_theme = "dark"
         self._tokens = {"dark": DARK_TOKENS, "light": LIGHT_TOKENS}
+
+    @classmethod
+    def instance(cls) -> "ThemeEngine":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
 
     @property
     def current_theme(self) -> str:

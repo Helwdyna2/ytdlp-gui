@@ -79,6 +79,7 @@ class VideoPreviewWidget(QWidget):
 
         self._duration = 0.0
         self._position = 0.0
+        self._requested_display_position: Optional[float] = None
         self._is_playing = False
         self._video_path: Optional[str] = None
         self._pending_video_path: Optional[str] = None
@@ -155,6 +156,12 @@ class VideoPreviewWidget(QWidget):
         self._playback.error_occurred.connect(self._on_playback_error)
         self._playback.availability_changed.connect(self._sync_availability_message)
         self._render_surface.render_ready.connect(self._on_render_surface_ready)
+        self._scrub_controller.preview_position_changed.connect(
+            self._on_scrub_preview_position_changed
+        )
+        self._scrub_controller.preview_override_changed.connect(
+            self._on_scrub_preview_override_changed
+        )
 
     def _on_slider_pressed(self) -> None:
         if self._duration <= 0:
@@ -165,8 +172,6 @@ class VideoPreviewWidget(QWidget):
         if self._duration <= 0:
             return
         position = (value / self._POSITION_SLIDER_STEPS) * self._duration
-        self._position = position
-        self._update_time_label()
         self._scrub_controller.update_drag(position)
 
     def _on_slider_released(self) -> None:
@@ -174,7 +179,6 @@ class VideoPreviewWidget(QWidget):
             return
         value = self._position_slider.value()
         position = (value / self._POSITION_SLIDER_STEPS) * self._duration
-        self._position = position
         self._scrub_controller.update_drag(position)
         self._scrub_controller.end_drag()
         self._update_time_label()
@@ -187,7 +191,8 @@ class VideoPreviewWidget(QWidget):
             self._position_slider.setValue(slider_value)
             self._position_slider.blockSignals(False)
 
-        self._update_time_label()
+        if self._requested_display_position is None:
+            self._update_time_label()
         self.position_changed.emit(self._position)
 
     def _on_duration_changed(self, duration: float) -> None:
@@ -220,6 +225,13 @@ class VideoPreviewWidget(QWidget):
             self._render_surface.show()
             return
 
+        if not self._playback.has_attempted_initialization():
+            self._availability_label.setText(
+                "Load a video to initialize preview playback and scrub controls."
+            )
+            self._render_surface.hide()
+            return
+
         self._availability_label.setText(
             "Preview playback is unavailable because libmpv could not be initialized.\n"
             "You can still load files, split segments, and export enabled ranges."
@@ -231,8 +243,13 @@ class VideoPreviewWidget(QWidget):
 
     def _update_time_label(self) -> None:
         self._time_label.setText(
-            f"{self._format_time(self._position)} / {self._format_time(self._duration)}"
+            f"{self._format_time(self._display_position())} / {self._format_time(self._duration)}"
         )
+
+    def _display_position(self) -> float:
+        if self._requested_display_position is not None:
+            return self._requested_display_position
+        return self._position
 
     def _format_time(self, seconds: float) -> str:
         if seconds < 0:
@@ -253,19 +270,21 @@ class VideoPreviewWidget(QWidget):
         self._position_slider.setEnabled(enabled)
 
     def load_video(self, path: str) -> bool:
-        if not self.is_available():
-            logger.warning("libmpv playback is unavailable, cannot load %s", path)
-            return False
-
         self._video_path = path
         self._pending_video_path = None
         self._position = 0.0
+        self._requested_display_position = None
         self._duration = 0.0
         self._position_slider.blockSignals(True)
         self._position_slider.setValue(0)
         self._position_slider.blockSignals(False)
         self._update_time_label()
         self._availability_label.setText(f"Loading {path}…")
+
+        if not self._playback.initialize_if_needed():
+            logger.warning("libmpv playback is unavailable, cannot load %s", path)
+            self._sync_availability_message(self._playback.is_available())
+            return False
 
         if not self._render_surface.isValid():
             self._pending_video_path = path
@@ -280,6 +299,7 @@ class VideoPreviewWidget(QWidget):
         self._pending_video_path = None
         self._duration = 0.0
         self._position = 0.0
+        self._requested_display_position = None
         self._is_playing = False
         self._set_controls_enabled(False)
         self._position_slider.blockSignals(True)
@@ -308,7 +328,7 @@ class VideoPreviewWidget(QWidget):
         self._playback.step_frame_backward()
 
     def get_position(self) -> float:
-        return self._position
+        return self._display_position()
 
     def get_duration(self) -> float:
         return self._duration
@@ -318,6 +338,16 @@ class VideoPreviewWidget(QWidget):
 
     def is_available(self) -> bool:
         return self._playback.is_available()
+
+    def _on_scrub_preview_position_changed(self, position: float) -> None:
+        self._requested_display_position = max(0.0, position)
+        self._update_time_label()
+
+    def _on_scrub_preview_override_changed(self, active: bool) -> None:
+        if active:
+            return
+        self._requested_display_position = None
+        self._update_time_label()
 
     def cleanup(self) -> None:
         self._playback.cleanup()

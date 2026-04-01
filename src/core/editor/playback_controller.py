@@ -16,7 +16,9 @@ from .mpv_binding import (
     MPV_EVENT_END_FILE,
     MPV_EVENT_FILE_LOADED,
     MPV_EVENT_NONE,
+    MPV_EVENT_PLAYBACK_RESTART,
     MPV_EVENT_PROPERTY_CHANGE,
+    MPV_EVENT_SEEK,
     MPV_FORMAT_DOUBLE,
     MPV_FORMAT_FLAG,
     MpvBindingError,
@@ -41,6 +43,7 @@ class PlaybackController(QObject):
     render_update_requested = pyqtSignal()
     error_occurred = pyqtSignal(str)
     availability_changed = pyqtSignal(bool)
+    seek_settled = pyqtSignal(int, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,15 +55,25 @@ class PlaybackController(QObject):
         self._is_playing = False
         self._available = False
         self._last_loaded_path: Optional[str] = None
+        self._seek_serial = 0
+        self._pending_seek_serial: Optional[int] = None
 
         self._wakeup_callback: Optional[WakeupCallback] = None
         self._render_update_callback: Optional[RenderUpdateCallback] = None
         self._get_proc_callback: Optional[GetProcAddressCallback] = None
         self._gl_init_params: Optional[MpvOpenGLInitParams] = None
+        self._initialization_attempted = False
 
+    def _ensure_initialized(self) -> bool:
+        if self.is_available():
+            return True
+        if self._initialization_attempted:
+            return False
         self._initialize_client()
+        return self.is_available()
 
     def _initialize_client(self) -> None:
+        self._initialization_attempted = True
         if os.environ.get("QT_QPA_PLATFORM") in {"offscreen", "minimal"}:
             logger.info("Skipping libmpv initialization on headless Qt platform.")
             self._available = False
@@ -93,7 +106,15 @@ class PlaybackController(QObject):
     def is_available(self) -> bool:
         return self._available and self._client is not None
 
+    def has_attempted_initialization(self) -> bool:
+        return self._initialization_attempted
+
+    def initialize_if_needed(self) -> bool:
+        return self._ensure_initialized()
+
     def attach_render_context(self) -> bool:
+        if not self._ensure_initialized():
+            return False
         if not self.is_available() or self._render_context is not None:
             return self._render_context is not None
 
@@ -136,10 +157,13 @@ class PlaybackController(QObject):
         self._render_context.render(fbo, width, height, flip_y=True)
 
     def load_file(self, path: str) -> bool:
+        if not self._ensure_initialized():
+            return False
         if not self.is_available():
             return False
         try:
             self._position = 0.0
+            self._pending_seek_serial = None
             self.position_changed.emit(0.0)
             self._client.command(["loadfile", path, "replace"])
             self.pause()
@@ -183,20 +207,27 @@ class PlaybackController(QObject):
             self._position = 0.0
             self._duration = 0.0
             self._is_playing = False
+            self._pending_seek_serial = None
             self.position_changed.emit(0.0)
             self.duration_changed.emit(0.0)
             self.playback_state_changed.emit(False)
         except Exception as exc:
             self.error_occurred.emit(str(exc))
 
-    def seek(self, seconds: float, precise: bool = True) -> None:
+    def seek(self, seconds: float, precise: bool = True) -> Optional[int]:
         if not self.is_available():
-            return
+            return None
         mode = "absolute+exact" if precise else "absolute+keyframes"
         try:
+            self._seek_serial += 1
+            serial = self._seek_serial
+            self._pending_seek_serial = serial
             self._client.command(["seek", f"{seconds:.6f}", mode])
+            return serial
         except Exception as exc:
+            self._pending_seek_serial = None
             self.error_occurred.emit(str(exc))
+            return None
 
     def step_frame_forward(self) -> None:
         if not self.is_available():
@@ -287,12 +318,18 @@ class PlaybackController(QObject):
             self._handle_property_change(event)
         elif event.event_id == MPV_EVENT_FILE_LOADED:
             self._position = 0.0
+            self._pending_seek_serial = None
             self.file_loaded.emit()
         elif event.event_id == MPV_EVENT_END_FILE:
             self._position = 0.0
             self._is_playing = False
+            self._pending_seek_serial = None
             self.position_changed.emit(0.0)
             self.playback_state_changed.emit(False)
+        elif event.event_id == MPV_EVENT_SEEK:
+            return
+        elif event.event_id == MPV_EVENT_PLAYBACK_RESTART:
+            self._emit_seek_settled()
 
     def _handle_property_change(self, event) -> None:
         prop = ctypes.cast(event.data, ctypes.POINTER(MpvEventProperty)).contents
@@ -311,3 +348,10 @@ class PlaybackController(QObject):
             if name == "pause":
                 self._is_playing = not value
                 self.playback_state_changed.emit(self._is_playing)
+
+    def _emit_seek_settled(self) -> None:
+        if self._pending_seek_serial is None:
+            return
+        serial = self._pending_seek_serial
+        self._pending_seek_serial = None
+        self.seek_settled.emit(serial, self._position)

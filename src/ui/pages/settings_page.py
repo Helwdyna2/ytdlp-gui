@@ -428,7 +428,7 @@ class SettingsPage(QWidget):
 
         # Theme
         theme = self._config.get("appearance.theme", "dark")
-        engine = ThemeEngine()
+        engine = ThemeEngine.instance()
         engine.set_theme(theme)
         current = engine.current_theme.capitalize()
         index = self._theme_combo.findText(current)
@@ -541,7 +541,7 @@ class SettingsPage(QWidget):
         if self._loading:
             return
         theme = text.lower()
-        engine = ThemeEngine()
+        engine = ThemeEngine.instance()
         engine.set_theme(theme)
         engine.apply_theme(QApplication.instance())
         self._config.set("appearance.theme", theme)

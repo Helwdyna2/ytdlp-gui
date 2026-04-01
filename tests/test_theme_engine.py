@@ -29,22 +29,22 @@ def qapp():
 def test_theme_engine_singleton(qapp):
     from src.ui.theme.theme_engine import ThemeEngine
 
-    engine1 = ThemeEngine()
-    engine2 = ThemeEngine()
+    engine1 = ThemeEngine.instance()
+    engine2 = ThemeEngine.instance()
     assert engine1 is engine2
 
 
 def test_theme_engine_default_is_dark(qapp):
     from src.ui.theme.theme_engine import ThemeEngine
 
-    engine = ThemeEngine()
+    engine = ThemeEngine.instance()
     assert engine.current_theme == "dark"
 
 
 def test_theme_engine_toggle(qapp):
     from src.ui.theme.theme_engine import ThemeEngine
 
-    engine = ThemeEngine()
+    engine = ThemeEngine.instance()
     engine.toggle_theme()
     assert engine.current_theme == "light"
     engine.toggle_theme()
@@ -55,7 +55,7 @@ def test_theme_engine_apply_produces_qss(qapp):
     from src.ui.theme.theme_engine import ThemeEngine
     from src.ui.theme.tokens import DARK_TOKENS
 
-    engine = ThemeEngine()
+    engine = ThemeEngine.instance()
     engine.apply_theme(qapp)
     qss = qapp.styleSheet()
     assert len(qss) > 100
@@ -65,7 +65,7 @@ def test_theme_engine_apply_produces_qss(qapp):
 def test_theme_engine_emits_signal(qapp):
     from src.ui.theme.theme_engine import ThemeEngine
 
-    engine = ThemeEngine()
+    engine = ThemeEngine.instance()
     received = []
     engine.theme_changed.connect(lambda t: received.append(t))
     engine.set_theme("light")
@@ -75,7 +75,7 @@ def test_theme_engine_emits_signal(qapp):
 def test_theme_engine_no_signal_if_same_theme(qapp):
     from src.ui.theme.theme_engine import ThemeEngine
 
-    engine = ThemeEngine()
+    engine = ThemeEngine.instance()
     received = []
     engine.theme_changed.connect(lambda t: received.append(t))
     engine.set_theme("dark")  # Already dark, should not emit
@@ -86,7 +86,7 @@ def test_theme_engine_get_color(qapp):
     from src.ui.theme.theme_engine import ThemeEngine
     from src.ui.theme.tokens import DARK_TOKENS
 
-    engine = ThemeEngine()
+    engine = ThemeEngine.instance()
     assert engine.get_color("cyan") == DARK_TOKENS["cyan"]
     assert engine.get_color("bg-void") == DARK_TOKENS["bg-void"]
 
@@ -95,7 +95,7 @@ def test_theme_engine_get_color_light(qapp):
     from src.ui.theme.theme_engine import ThemeEngine
     from src.ui.theme.tokens import LIGHT_TOKENS
 
-    engine = ThemeEngine()
+    engine = ThemeEngine.instance()
     engine.set_theme("light")
     assert engine.get_color("bg-void") == LIGHT_TOKENS["bg-void"]
 
@@ -103,6 +103,6 @@ def test_theme_engine_get_color_light(qapp):
 def test_theme_engine_invalid_theme(qapp):
     from src.ui.theme.theme_engine import ThemeEngine
 
-    engine = ThemeEngine()
+    engine = ThemeEngine.instance()
     with pytest.raises(ValueError):
         engine.set_theme("blue")

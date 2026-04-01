@@ -181,7 +181,7 @@ class RenamePreviewTable(QTableWidget):
         self._checked_states: List[bool] = []
         self._conflict_rows: set = set()
 
-        self._engine = ThemeEngine()
+        self._engine = ThemeEngine.instance()
         self._update_theme_colors()
         self._engine.theme_changed.connect(self._on_theme_changed)
 
