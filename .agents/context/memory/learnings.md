@@ -1,0 +1,3 @@
+- Convert runtime logs now use a reusable `ProcessLogDialog`; future screens can feed it with generic item records plus `add_log_entry(...)` instead of building screen-specific log popouts.
+- `FFmpegWorker` exposes the exact formatted command through `command_built`, and `ConversionManager` forwards it as `job_command_built(job_id, input_path, command)` for UI-safe signal/slot wiring.
+- Do not persist UI state during `ConvertPage._load_settings()`: saving too early can overwrite hardware selections before encoder detection runs.

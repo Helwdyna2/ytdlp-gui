@@ -24,10 +24,13 @@ from PyQt6.QtWidgets import (
 
 from ...core.conversion_manager import ConversionManager
 from ...core.conversion_paths import (
+    SAME_AS_SOURCE_CODEC,
     build_conversion_output_name,
     build_conversion_output_path,
     get_conversion_output_extension,
     get_conversion_preview_folder,
+    normalize_conversion_codec,
+    resolve_conversion_output_codec,
 )
 from ...core.ffprobe_worker import FFprobeWorker
 from ...core.folder_scan_worker import FolderScanWorker
@@ -52,10 +55,12 @@ from ..components.page_header import PageHeader
 from ..components.split_layout import SplitLayout
 from ..components.data_panel import DataPanel
 from ..widgets.folder_preview_widget import FolderPreviewWidget
+from ..widgets.process_log_dialog import ProcessLogDialog
 
 logger = logging.getLogger(__name__)
 
 OUTPUT_FORMATS = [
+    ("Same as source", SAME_AS_SOURCE_CODEC),
     ("mp4 / H.264", "h264"),
     ("mp4 / H.265 (HEVC)", "hevc"),
     ("webm / VP9", "vp9"),
@@ -379,7 +384,15 @@ class ConvertPage(QWidget):
         self._hardware_encoders: List[HardwareEncoder] = []
         self._file_codecs: Dict[str, str] = {}
         self._file_metadata: Dict[str, object] = {}
+        self._job_input_paths: Dict[int, str] = {}
         self._loading_settings = False
+        self._process_log_dialog = ProcessLogDialog(
+            title="Convert Log",
+            description=(
+                "Live conversion activity with per-file output status and the exact FFmpeg command used."
+            ),
+            parent=self,
+        )
 
         self._setup_ui()
         self._connect_signals()
@@ -540,6 +553,11 @@ class ConvertPage(QWidget):
         self._cancel_btn.setVisible(False)
         right_layout.addWidget(self._cancel_btn)
 
+        self._view_log_btn = QPushButton("View Log")
+        self._view_log_btn.setObjectName("btnWire")
+        self._view_log_btn.setProperty("button_role", "secondary")
+        right_layout.addWidget(self._view_log_btn)
+
         root.addWidget(split, stretch=1)
 
     def _connect_signals(self) -> None:
@@ -557,6 +575,7 @@ class ConvertPage(QWidget):
         self._output_input.textChanged.connect(self._on_settings_changed)
         self._output_input.textChanged.connect(self._update_preview)
         self._output_browse_btn.clicked.connect(self._on_browse_output)
+        self._view_log_btn.clicked.connect(self._on_view_log)
         self._expand_all_btn.clicked.connect(self._preview_tree.expandAll)
         self._collapse_all_btn.clicked.connect(self._preview_tree.collapseAll)
 
@@ -593,10 +612,13 @@ class ConvertPage(QWidget):
             source_filter_enabled = self._config_service.get(
                 "convert.skip_matching_output_enabled", False
             )
+            if codec == SAME_AS_SOURCE_CODEC:
+                source_filter_enabled = False
             self._source_codec_filter_check.setChecked(source_filter_enabled)
         finally:
             self._loading_settings = False
 
+        self._sync_output_format_state()
         self._update_start_button_state()
 
     def _save_settings(self) -> None:
@@ -644,6 +666,7 @@ class ConvertPage(QWidget):
 
     def _on_output_codec_changed(self) -> None:
         """Refresh dependent controls when the output codec changes."""
+        self._sync_output_format_state()
         preferred_hardware = self._hw_combo.currentData()
         self._refresh_hardware_options(
             preferred_name=preferred_hardware, prefer_none=preferred_hardware is None
@@ -667,6 +690,12 @@ class ConvertPage(QWidget):
         if folder:
             update_dialog_last_dir(folder)
             self._output_input.setText(folder)
+
+    def _on_view_log(self) -> None:
+        """Show the live conversion log dialog."""
+        self._process_log_dialog.show()
+        self._process_log_dialog.raise_()
+        self._process_log_dialog.activateWindow()
 
     def _on_files_changed(self) -> None:
         """Refresh queue readiness when the file set changes."""
@@ -716,18 +745,38 @@ class ConvertPage(QWidget):
                 )
 
         config = self._build_config()
-        output_paths = self._build_output_paths(
-            files_to_convert, config.output_dir
-        )
+        unsupported_source_paths = self._unsupported_source_output_paths(files_to_convert)
+        if unsupported_source_paths:
+            unsupported_names = [Path(path).name for path in unsupported_source_paths[:5]]
+            remaining = len(unsupported_source_paths) - len(unsupported_names)
+            suffix = ""
+            if remaining > 0:
+                suffix = f"\n...and {remaining} more file(s)."
+            QMessageBox.warning(
+                self,
+                "Unsupported Source Format",
+                "Same as source is only available for H.264, H.265, VP9, MP3, AAC, and FLAC inputs.\n\n"
+                f"Unsupported files:\n" + "\n".join(unsupported_names) + suffix,
+            )
+            return
+
+        output_paths = self._build_output_paths(files_to_convert, config.output_dir)
+        source_codecs = self._build_source_codec_map(files_to_convert)
 
         # Create manager
         self._conversion_manager = ConversionManager()
         self._conversion_manager.set_config(config)
+        self._process_log_dialog.clear()
+        self._process_log_dialog.add_log_entry(
+            "info",
+            f"Queued {len(files_to_convert)} file(s) for conversion.",
+        )
 
         # Connect manager signals
         self._conversion_manager.job_started.connect(self._on_job_started)
         self._conversion_manager.job_progress.connect(self._on_job_progress)
         self._conversion_manager.job_completed.connect(self._on_job_completed)
+        self._conversion_manager.job_command_built.connect(self._on_job_command_built)
         self._conversion_manager.queue_progress.connect(self._on_queue_progress)
         self._conversion_manager.all_completed.connect(self._on_all_completed)
         self._conversion_manager.job_creation_progress.connect(
@@ -735,6 +784,7 @@ class ConvertPage(QWidget):
         )
         self._conversion_manager.jobs_created.connect(self._on_jobs_created)
         self._conversion_manager.files_deleted.connect(self._on_files_deleted)
+        self._conversion_manager.log.connect(self._on_manager_log)
 
         # Disable controls while running
         self._file_list.set_enabled(False)
@@ -754,6 +804,7 @@ class ConvertPage(QWidget):
             files_to_convert,
             config.output_dir,
             output_paths=output_paths,
+            source_codecs=source_codecs,
         )
 
     def _on_cancel(self) -> None:
@@ -773,9 +824,18 @@ class ConvertPage(QWidget):
     def _on_jobs_created(self, jobs: List[ConversionJob]) -> None:
         """Prepare progress display once all jobs are created."""
         self._pending_job_widgets = {}
+        self._job_input_paths = {}
         for job in jobs:
             if job.id is not None:
                 self._pending_job_widgets[job.id] = Path(job.input_path).name
+                self._job_input_paths[job.id] = job.input_path
+                self._process_log_dialog.upsert_record(
+                    str(job.id),
+                    title=Path(job.input_path).name,
+                    input_path=job.input_path,
+                    status="Queued",
+                    output_path=job.output_path,
+                )
 
         self._done_count = 0
         self._failed_count = 0
@@ -796,6 +856,12 @@ class ConvertPage(QWidget):
             item = QListWidgetItem(f"{filename} — Converting…")
             item.setData(Qt.ItemDataRole.UserRole, job_id)
             self._jobs_list.addItem(item)
+            self._process_log_dialog.upsert_record(
+                str(job_id),
+                title=filename,
+                input_path=self._job_input_paths.get(job_id, ""),
+                status="Converting",
+            )
 
     def _on_job_progress(
         self, job_id: int, percent: float, speed: str, eta: str
@@ -812,18 +878,27 @@ class ConvertPage(QWidget):
         self, job_id: int, success: bool, output_path: str, error: str
     ) -> None:
         """Mark job as complete or failed in the list."""
+        status_text = "Complete" if success else ("Cancelled" if "Cancelled" in error else "Failed")
         for i in range(self._jobs_list.count()):
             item = self._jobs_list.item(i)
             if item and item.data(Qt.ItemDataRole.UserRole) == job_id:
                 name = item.text().split(" — ")[0]
                 if success:
                     self._done_count += 1
-                    item.setText(f"{name} — Complete")
+                    item.setText(f"{name} — {status_text}")
                 else:
                     self._failed_count += 1
-                    status = "Cancelled" if "Cancelled" in error else "Failed"
-                    item.setText(f"{name} — {status}")
+                    item.setText(f"{name} — {status_text}")
                 break
+
+        self._process_log_dialog.upsert_record(
+            str(job_id),
+            title=Path(self._job_input_paths.get(job_id, output_path or str(job_id))).name,
+            input_path=self._job_input_paths.get(job_id, ""),
+            status=status_text,
+            output_path=output_path,
+            details=error or "Output ready.",
+        )
 
     def _on_queue_progress(self, completed: int, total: int, in_progress: int) -> None:
         """Update overall progress bar."""
@@ -855,6 +930,11 @@ class ConvertPage(QWidget):
                     f"Converted {completed} files.\n{failed} files failed.",
                 )
 
+            self._process_log_dialog.add_log_entry(
+                "warning" if failed else "info",
+                f"Conversion finished: {completed} completed, {failed} failed.",
+            )
+
             self._conversion_manager.reset_counts()
 
         self._done_count = 0
@@ -883,18 +963,62 @@ class ConvertPage(QWidget):
             "libx264": "h264",
             "libx265": "hevc",
         }
-        return codec_map.get(codec, codec)
+        return normalize_conversion_codec(codec_map.get(codec, codec))
 
     def _normalize_source_codec(self, codec: str) -> str:
         """Normalize source codec values from ffprobe."""
-        normalized = codec.strip().lower()
-        if normalized == "h265":
-            return "hevc"
-        return normalized
+        return normalize_conversion_codec(codec)
 
     def _get_selected_output_codec(self) -> str:
         """Get the selected output codec."""
         return self._codec_combo.currentData() or "h264"
+
+    def _sync_output_format_state(self) -> None:
+        """Keep dependent controls in sync with the selected output format."""
+        is_source_output = self._get_selected_output_codec() == SAME_AS_SOURCE_CODEC
+        if is_source_output and self._source_codec_filter_check.isChecked():
+            self._source_codec_filter_check.setChecked(False)
+        self._source_codec_filter_check.setEnabled(
+            self.isEnabled() and not is_source_output
+        )
+
+    def _build_source_codec_map(self, input_paths: List[str]) -> Dict[str, str]:
+        """Build a source codec map for queued files."""
+        return {
+            path: self._file_codecs[path]
+            for path in input_paths
+            if path in self._file_codecs
+        }
+
+    def _unsupported_source_output_paths(
+        self, input_paths: Optional[List[str]] = None
+    ) -> List[str]:
+        """Return queued files that cannot use Same as source output."""
+        if self._get_selected_output_codec() != SAME_AS_SOURCE_CODEC:
+            return []
+
+        paths = input_paths if input_paths is not None else self._file_list.get_file_paths()
+        unsupported_paths: List[str] = []
+        for path in paths:
+            if resolve_conversion_output_codec(
+                SAME_AS_SOURCE_CODEC,
+                self._file_codecs.get(path),
+            ) is None:
+                unsupported_paths.append(path)
+        return unsupported_paths
+
+    def _on_manager_log(self, level: str, message: str) -> None:
+        """Append manager and worker log entries to the popout log."""
+        self._process_log_dialog.add_log_entry(level, message)
+
+    def _on_job_command_built(self, job_id: int, input_path: str, command: str) -> None:
+        """Store the FFmpeg command used for a queued file."""
+        self._process_log_dialog.upsert_record(
+            str(job_id),
+            title=Path(input_path).name,
+            input_path=input_path,
+            command=command,
+        )
 
     def _normalize_resolution_value(self, value: Optional[str]) -> str:
         """Normalize stored output resolution values."""
@@ -1003,12 +1127,23 @@ class ConvertPage(QWidget):
     def _matches_selected_output_format(self, file_path: str) -> bool:
         """Return whether the input already matches the selected output format."""
         output_codec = self._get_selected_output_codec()
-        expected_extension = get_conversion_output_extension(output_codec)
+        resolved_output_codec = resolve_conversion_output_codec(
+            output_codec,
+            self._file_codecs.get(file_path),
+        )
+        if resolved_output_codec is None:
+            return False
+
+        expected_extension = get_conversion_output_extension(
+            output_codec,
+            input_path=file_path,
+            source_codec=self._file_codecs.get(file_path),
+        )
         if Path(file_path).suffix.lower() != expected_extension:
             return False
 
-        if output_codec in {"h264", "hevc", "vp9"}:
-            return self._file_codecs.get(file_path) == output_codec
+        if resolved_output_codec in {"h264", "hevc", "vp9"}:
+            return self._file_codecs.get(file_path) == resolved_output_codec
 
         return True
 
@@ -1027,6 +1162,21 @@ class ConvertPage(QWidget):
     ) -> None:
         """Populate the hardware acceleration combo for the selected codec."""
         output_codec = self._get_selected_output_codec()
+        if output_codec == SAME_AS_SOURCE_CODEC:
+            self._hw_combo.blockSignals(True)
+            self._hw_combo.clear()
+            self._hw_combo.addItem("Not available for this format", None)
+            self._hw_combo.setCurrentIndex(0)
+            self._hw_combo.setEnabled(False)
+            status_message = (
+                "Hardware acceleration is unavailable when output format is set to Same as source."
+            )
+            self._hw_combo.setToolTip(status_message)
+            self._hw_status_label.setText(status_message)
+            self._hw_status_label.setVisible(True)
+            self._hw_combo.blockSignals(False)
+            return
+
         hardware_supported = output_codec in {"h264", "hevc"}
         compatible_encoders = get_compatible_hardware_encoders(
             output_codec, self._hardware_encoders
@@ -1177,6 +1327,7 @@ class ConvertPage(QWidget):
                 output_dir=output_dir,
                 source_root=source_roots.get(input_path),
                 output_codec=self._get_selected_output_codec(),
+                source_codec=self._file_codecs.get(input_path),
             )
             for input_path in input_paths
         }
@@ -1198,7 +1349,9 @@ class ConvertPage(QWidget):
             )
             preview.setdefault(folder, []).append(
                 build_conversion_output_name(
-                    input_path, output_codec=self._get_selected_output_codec()
+                    input_path,
+                    output_codec=self._get_selected_output_codec(),
+                    source_codec=self._file_codecs.get(input_path),
                 )
             )
 
@@ -1210,6 +1363,7 @@ class ConvertPage(QWidget):
             self._file_list.count() > 0
             and not self._file_list.is_busy()
             and self._preflight_worker is None
+            and not self._unsupported_source_output_paths()
             and not self._cancel_btn.isVisible()
         )
         self._start_btn.setEnabled(can_start)
@@ -1235,6 +1389,13 @@ class ConvertPage(QWidget):
         if self._preflight_worker is not None:
             self._preflight_status_label.setText(
                 f"Analyzing {file_count} file(s) with ffprobe..."
+            )
+            return
+
+        unsupported_source_paths = self._unsupported_source_output_paths()
+        if unsupported_source_paths:
+            self._preflight_status_label.setText(
+                "Same as source is only available for H.264, H.265, VP9, MP3, AAC, and FLAC inputs."
             )
             return
 
@@ -1268,7 +1429,7 @@ class ConvertPage(QWidget):
         self._preset_combo.setEnabled(enabled)
         if enabled:
             self._hw_combo.setEnabled(self._hw_combo.count() > 1)
-            self._source_codec_filter_check.setEnabled(True)
+            self._sync_output_format_state()
             self._update_start_button_state()
         else:
             self._hw_combo.setEnabled(False)
@@ -1276,3 +1437,4 @@ class ConvertPage(QWidget):
             self._start_btn.setEnabled(False)
         self._output_input.setEnabled(enabled)
         self._output_browse_btn.setEnabled(enabled)
+        self._view_log_btn.setEnabled(True)

@@ -1,5 +1,7 @@
 """Tests for FFmpegWorker command construction."""
 
+import pytest
+
 from src.core.ffmpeg_worker import FFmpegWorker
 from src.data.models import ConversionConfig
 
@@ -58,3 +60,44 @@ def test_ffmpeg_worker_builds_audio_only_command():
     assert "-vn" in command
     assert "libmp3lame" in command
     assert "-c:v" not in command
+
+
+def test_ffmpeg_worker_builds_same_as_source_video_command():
+    worker = FFmpegWorker(
+        "/tmp/input.mov",
+        "/tmp/output.mov",
+        ConversionConfig(output_codec="source"),
+        source_codec="hevc",
+    )
+
+    command = worker._build_command("/usr/local/bin/ffmpeg")
+
+    assert command[command.index("-c:v") + 1] == "libx265"
+    assert command[-1] == "/tmp/output.mov"
+
+
+def test_ffmpeg_worker_builds_same_as_source_audio_command():
+    worker = FFmpegWorker(
+        "/tmp/input.m4a",
+        "/tmp/output.m4a",
+        ConversionConfig(output_codec="source"),
+        source_codec="aac",
+    )
+
+    command = worker._build_command("/usr/local/bin/ffmpeg")
+
+    assert "-vn" in command
+    assert command[command.index("-c:a") + 1] == "aac"
+    assert "-c:v" not in command
+
+
+def test_ffmpeg_worker_rejects_unsupported_same_as_source_codec():
+    worker = FFmpegWorker(
+        "/tmp/input.mkv",
+        "/tmp/output.mkv",
+        ConversionConfig(output_codec="source"),
+        source_codec="av1",
+    )
+
+    with pytest.raises(ValueError, match="Same as source"):
+        worker._build_command("/usr/local/bin/ffmpeg")

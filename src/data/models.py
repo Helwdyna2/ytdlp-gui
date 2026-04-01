@@ -331,6 +331,8 @@ class ConversionJob:
     duration: float = 0.0
     created_at: datetime = field(default_factory=datetime.now)
     completed_at: Optional[datetime] = None
+    source_codec: Optional[str] = None
+    ffmpeg_command: Optional[str] = None
 
     @classmethod
     def from_row(cls, row) -> "ConversionJob":

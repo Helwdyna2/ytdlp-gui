@@ -39,6 +39,7 @@ class JobCreationWorker(QThread):
         input_paths: List[str],
         output_dir: str,
         output_paths: Optional[Dict[str, str]],
+        source_codecs: Optional[Dict[str, str]],
         config: ConversionConfig,
         repository: ConversionRepository,
         parent=None,
@@ -57,6 +58,7 @@ class JobCreationWorker(QThread):
         self._input_paths = input_paths
         self._output_dir = output_dir
         self._output_paths = output_paths or {}
+        self._source_codecs = source_codecs or {}
         self._config = config
         self._repository = repository
         self._cancelled = False
@@ -130,6 +132,7 @@ class JobCreationWorker(QThread):
             input_path,
             output_dir=self._output_dir,
             output_codec=self._config.output_codec,
+            source_codec=self._source_codecs.get(input_path),
         )
 
         # Get input file size (blocking I/O - that's why we're in a thread)
@@ -152,6 +155,7 @@ class JobCreationWorker(QThread):
             if self._config.use_hardware_accel
             else None,
             input_size=input_size,
+            source_codec=self._source_codecs.get(input_path),
         )
 
         # Persist to database (blocking DB write - that's why we're in a thread)
