@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import locale
+import logging
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -29,9 +31,42 @@ MPV_RENDER_PARAM_FLIP_Y = 4
 MPV_RENDER_API_TYPE_OPENGL = b"opengl"
 GL_RGBA8 = 0x8058
 
+logger = logging.getLogger(__name__)
+_MPV_LOCALE_CONFIGURED = False
+
 
 class MpvBindingError(RuntimeError):
     """Raised when libmpv calls fail."""
+
+
+def ensure_c_numeric_locale() -> bool:
+    """Force a C numeric locale so libmpv can initialize reliably."""
+
+    global _MPV_LOCALE_CONFIGURED
+
+    if _MPV_LOCALE_CONFIGURED:
+        return True
+
+    current = locale.setlocale(locale.LC_NUMERIC, None)
+    if current == "C":
+        _MPV_LOCALE_CONFIGURED = True
+        return True
+
+    try:
+        locale.setlocale(locale.LC_NUMERIC, "C")
+    except locale.Error:
+        logger.exception(
+            "libmpv requires LC_NUMERIC='C', but the current locale %r could not be changed.",
+            current,
+        )
+        return False
+
+    logger.info(
+        "Adjusted LC_NUMERIC from %r to 'C' for libmpv compatibility.",
+        current,
+    )
+    _MPV_LOCALE_CONFIGURED = True
+    return True
 
 
 WakeupCallback = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
@@ -114,6 +149,10 @@ class LibMpv:
     """Configured ctypes wrapper around the mpv shared library."""
 
     def __init__(self, library_path: Optional[str] = None):
+        if not ensure_c_numeric_locale():
+            raise MpvBindingError(
+                "libmpv requires LC_NUMERIC='C' but the process locale could not be configured"
+            )
         self.library_path = library_path or _find_mpv_library()
         if not self.library_path:
             raise MpvBindingError("libmpv could not be located on this system")

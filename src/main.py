@@ -1,12 +1,13 @@
 """Application entry point."""
 
+import locale
 import sys
 import logging
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QMessageBox, QCheckBox
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QSurfaceFormat
+from PyQt6.QtGui import QGuiApplication, QSurfaceFormat
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
 from .utils.platform_utils import ensure_dirs, get_log_dir
@@ -222,6 +223,25 @@ def check_single_instance() -> bool:
     return True
 
 
+def configure_process_locale(logger: logging.Logger) -> None:
+    """Keep numeric formatting compatible with libmpv and FFmpeg parsing."""
+
+    current = locale.setlocale(locale.LC_NUMERIC, None)
+    if current == "C":
+        return
+
+    try:
+        locale.setlocale(locale.LC_NUMERIC, "C")
+    except locale.Error:
+        logger.warning(
+            "Unable to force LC_NUMERIC='C' at startup; current locale is %r.",
+            current,
+        )
+        return
+
+    logger.info("Adjusted LC_NUMERIC from %r to 'C' during startup.", current)
+
+
 def main():
     """Main application entry point."""
     # Setup logging first
@@ -229,6 +249,8 @@ def main():
     logger = logging.getLogger(__name__)
 
     try:
+        configure_process_locale(logger)
+
         surface_format = QSurfaceFormat()
         surface_format.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
         surface_format.setSwapBehavior(QSurfaceFormat.SwapBehavior.DoubleBuffer)
@@ -237,6 +259,9 @@ def main():
         surface_format.setVersion(3, 2)
         surface_format.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
         QSurfaceFormat.setDefaultFormat(surface_format)
+        QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
 
         # Create Qt application with single-instance support
         app = SingleApplication(sys.argv)
@@ -257,11 +282,6 @@ def main():
                 "Only one instance can run at a time to prevent data conflicts.",
             )
             return 0
-
-        # Enable high DPI scaling
-        app.setHighDpiScaleFactorRoundingPolicy(
-            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-        )
 
         # Initialize database
         logger.info("Initializing database...")

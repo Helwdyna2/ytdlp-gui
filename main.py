@@ -1,11 +1,13 @@
 """Application entry point for PyInstaller."""
 
+import locale
 import sys
 import logging
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QGuiApplication
 
 from src.utils.platform_utils import ensure_dirs, get_log_dir
 from src.utils.constants import APP_NAME, APP_VERSION
@@ -88,15 +90,29 @@ def main():
     logger = logging.getLogger(__name__)
 
     try:
+        current_numeric = locale.setlocale(locale.LC_NUMERIC, None)
+        if current_numeric != "C":
+            try:
+                locale.setlocale(locale.LC_NUMERIC, "C")
+            except locale.Error:
+                logger.warning(
+                    "Unable to force LC_NUMERIC='C' at startup; current locale is %r.",
+                    current_numeric,
+                )
+            else:
+                logger.info(
+                    "Adjusted LC_NUMERIC from %r to 'C' during startup.",
+                    current_numeric,
+                )
+
+        QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
+
         # Create Qt application
         app = QApplication(sys.argv)
         app.setApplicationName(APP_NAME)
         app.setApplicationVersion(APP_VERSION)
-
-        # Enable high DPI scaling
-        app.setHighDpiScaleFactorRoundingPolicy(
-            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-        )
 
         # Initialize database
         logger.info("Initializing database...")
