@@ -156,6 +156,32 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_sessions_is_active ON sessions(is_active)
         """)
 
+        # Saved tasks table
+        self.execute("""
+            CREATE TABLE IF NOT EXISTS saved_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                payload TEXT NOT NULL DEFAULT '{}',
+                summary TEXT NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                deleted_at TIMESTAMP,
+                CONSTRAINT chk_saved_task_status CHECK (status IN ('pending', 'in_progress', 'completed', 'failed', 'deleted'))
+            )
+        """)
+
+        self.execute("""
+            CREATE INDEX IF NOT EXISTS idx_saved_tasks_status ON saved_tasks(status)
+        """)
+
+        self.execute("""
+            CREATE INDEX IF NOT EXISTS idx_saved_tasks_updated_at ON saved_tasks(updated_at DESC)
+        """)
+
+        self.execute("""
+            CREATE INDEX IF NOT EXISTS idx_saved_tasks_deleted_at ON saved_tasks(deleted_at)
+        """)
+
         # Config table
         self.execute("""
             CREATE TABLE IF NOT EXISTS config (
@@ -199,6 +225,10 @@ class Database:
             # Migration 3: Add conversion_jobs table
             if current < 3:
                 self._migrate_to_v3()
+
+            # Migration 4: Add saved_tasks table
+            if current < 4:
+                self._migrate_to_v4()
 
     def _migrate_to_v2(self) -> None:
         """Migration v2: Add updated_at column to downloads table."""
@@ -271,6 +301,41 @@ class Database:
             (3, "Add conversion_jobs table")
         )
         logger.info("Migration v3 completed")
+
+    def _migrate_to_v4(self) -> None:
+        """Migration v4: Add saved_tasks table."""
+        logger.info("Running migration v4: Adding saved_tasks table")
+
+        self.execute("""
+            CREATE TABLE IF NOT EXISTS saved_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                payload TEXT NOT NULL DEFAULT '{}',
+                summary TEXT NOT NULL DEFAULT '{}',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                deleted_at TIMESTAMP,
+                CONSTRAINT chk_saved_task_status CHECK (status IN ('pending', 'in_progress', 'completed', 'failed', 'deleted'))
+            )
+        """)
+
+        self.execute("""
+            CREATE INDEX IF NOT EXISTS idx_saved_tasks_status ON saved_tasks(status)
+        """)
+
+        self.execute("""
+            CREATE INDEX IF NOT EXISTS idx_saved_tasks_updated_at ON saved_tasks(updated_at DESC)
+        """)
+
+        self.execute("""
+            CREATE INDEX IF NOT EXISTS idx_saved_tasks_deleted_at ON saved_tasks(deleted_at)
+        """)
+
+        self.execute(
+            "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
+            (4, "Add saved_tasks table")
+        )
+        logger.info("Migration v4 completed")
 
     def close(self) -> None:
         """Close all database connections."""
