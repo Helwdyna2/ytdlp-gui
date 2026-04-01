@@ -29,6 +29,7 @@ from ...data.models import TrimConfig
 from ...services.config_service import ConfigService
 from ...utils.constants import VIDEO_FILE_FILTER
 from ...utils.dialog_utils import get_dialog_start_dir, update_dialog_last_dir
+from ...utils.platform_utils import Platform, get_platform
 from ..components.page_header import PageHeader
 from ..widgets.segment_list_widget import SegmentListWidget
 from ..widgets.trim_timeline_widget import TrimTimelineWidget
@@ -64,7 +65,7 @@ class TrimPage(QWidget):
     ):
         super().__init__(parent)
         self._trim_manager: Optional[TrimManager] = trim_manager
-        self._video_preview = video_preview or VideoPreviewWidget()
+        self._video_preview = video_preview or self._build_default_video_preview()
         self._trim_timeline = trim_timeline or TrimTimelineWidget()
         self._config_service = ConfigService()
         self._editor_session = EditorSession()
@@ -121,7 +122,20 @@ class TrimPage(QWidget):
         main_layout.addLayout(mode_row)
 
         # 3. Video preview
-        self._preview_container = self._video_preview
+        if self._video_preview is not None:
+            self._preview_container = self._video_preview
+        else:
+            placeholder = QLabel(
+                "Preview playback is temporarily disabled on macOS while the new "
+                "editor backend is being stabilized.\n\n"
+                "You can still load the file, split segments, label them, and "
+                "export enabled ranges."
+            )
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            placeholder.setWordWrap(True)
+            placeholder.setObjectName("dimLabel")
+            placeholder.setMinimumHeight(200)
+            self._preview_container = placeholder
         main_layout.addWidget(self._preview_container, stretch=3)
 
         # 4. Timeline
@@ -310,6 +324,16 @@ class TrimPage(QWidget):
         manager.job_completed.connect(self._on_job_completed)
         manager.queue_progress.connect(self._on_queue_progress)
         manager.all_completed.connect(self._on_all_completed)
+
+    def _build_default_video_preview(self) -> Optional[VideoPreviewWidget]:
+        """Return the safest default preview implementation for this platform."""
+        if get_platform() == Platform.MACOS:
+            logger.warning(
+                "Disabling the legacy mpv preview widget on macOS for Trim until "
+                "the new embedded playback backend is ready."
+            )
+            return None
+        return VideoPreviewWidget()
 
     # ------------------------------------------------------------------ #
     #  Settings persistence                                                #
