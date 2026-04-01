@@ -1,122 +1,327 @@
-"""Integration tests for MainWindow — tool registration, default selection, badges.
+"""Integration tests for MainWindow workbench wiring."""
 
-NOTE: MainWindow teardown may segfault during Python 3.14 + PyQt6 GC.
-This is a known environment issue (see AGENTS.md). The tests themselves
-pass; the crash occurs during object cleanup after the test completes.
-"""
 import gc
-import pytest
 import sys
 from unittest.mock import MagicMock
 
+import pytest
+
 pytest.importorskip("PyQt6.QtWidgets")
+
+from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtWidgets import QApplication, QLineEdit, QPushButton, QVBoxLayout, QWidget
+
+from src.data.database import Database
+from src.data.models import OutputConfig
 
 
 @pytest.fixture(autouse=True)
 def reset_singleton():
     from src.ui.theme.theme_engine import ThemeEngine
+
     ThemeEngine._instance = None
     yield
     ThemeEngine._instance = None
 
 
+@pytest.fixture(autouse=True)
+def reset_database():
+    Database.reset_instance()
+    yield
+    Database.reset_instance()
+
+
 @pytest.fixture
 def qapp():
-    from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv)
     yield app
 
 
-def _make_window(qapp, monkeypatch):
-    """Create a MainWindow with mocked DB/session."""
+class DummyConfigService:
+    def __init__(self):
+        self.values = {}
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+
+class DummyDownloadManager(QObject):
+    download_started = pyqtSignal(str, str)
+    download_progress = pyqtSignal(str, dict)
+    download_completed = pyqtSignal(str, bool, str)
+    download_title_found = pyqtSignal(str, str)
+    queue_progress = pyqtSignal(int, int, int, int)
+    aggregate_speed = pyqtSignal(float)
+    log_message = pyqtSignal(str, str)
+    all_completed = pyqtSignal()
+    downloads_started = pyqtSignal()
+    download_cancelling = pyqtSignal(str)
+    download_force_terminated = pyqtSignal(str)
+
+    def __init__(self, download_repo):
+        super().__init__()
+        self.download_repo = download_repo
+        self.is_running = False
+
+    def start_downloads(self, urls, config):
+        self.is_running = True
+
+    def cancel_all(self):
+        self.is_running = False
+
+    def get_remaining_urls(self):
+        return []
+
+
+class DummyAuthManager(QObject):
+    login_finished = pyqtSignal(str, str)
+    cookies_export_started = pyqtSignal()
+    cookies_exported = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+
+    def export_cookies(self):
+        self.cookies_export_started.emit()
+
+    def get_cookies_file_path(self):
+        return ""
+
+    def open_login(self, start_url, target_cookie_suffixes=None):
+        return None
+
+
+class DummyUrlInputWidget(QWidget):
+    urls_changed = pyqtSignal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        self.text_edit = QLineEdit(self)
+        layout.addWidget(self.text_edit)
+        self.urls = []
+
+    def focus_input(self):
+        self.text_edit.setFocus()
+
+    def add_urls(self, urls):
+        self.urls.extend(urls)
+        self.urls_changed.emit(list(self.urls))
+
+    def set_urls(self, urls):
+        self.urls = list(urls)
+        self.urls_changed.emit(list(self.urls))
+
+    def set_enabled(self, enabled):
+        self.setEnabled(enabled)
+
+
+class DummyFilePickerWidget(QWidget):
+    urls_loaded = pyqtSignal(list)
+
+    def _browse_url_file(self):
+        return None
+
+    def set_enabled(self, enabled):
+        self.setEnabled(enabled)
+
+
+class DummyOutputConfigWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.output_dir = ""
+        self._config = OutputConfig(output_dir="")
+
+    def get_config(self):
+        return OutputConfig(
+            output_dir=self.output_dir,
+            concurrent_limit=self._config.concurrent_limit,
+            force_overwrite=self._config.force_overwrite,
+            video_only=self._config.video_only,
+            cookies_path=self._config.cookies_path,
+        )
+
+    def set_config(self, values):
+        self.output_dir = values.get("output_dir", self.output_dir)
+
+    def set_enabled(self, enabled):
+        self.setEnabled(enabled)
+
+
+class DummyQueueProgressWidget(QWidget):
+    start_clicked = pyqtSignal()
+    cancel_clicked = pyqtSignal()
+    clear_history_clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        self.start_btn = QPushButton("Start", self)
+        self.cancel_btn = QPushButton("Cancel", self)
+        layout.addWidget(self.start_btn)
+        layout.addWidget(self.cancel_btn)
+
+    def set_url_count(self, count):
+        return None
+
+    def set_running(self, running):
+        return None
+
+    def update_progress(self, completed, failed, cancelled, total):
+        return None
+
+    def update_speed(self, speed):
+        return None
+
+
+class DummyProgressWidget(QWidget):
+    def add_download(self, url):
+        return None
+
+    def update_progress(self, url, progress):
+        return None
+
+    def set_title(self, url, title):
+        return None
+
+    def set_completed(self, url, success, message, cancelled=False):
+        return None
+
+    def set_cancelling(self, url):
+        return None
+
+    def clear_completed(self):
+        return None
+
+
+class DummyDownloadLogWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.entries = []
+
+    def clear(self):
+        self.entries.clear()
+
+    def add_info(self, message):
+        self.entries.append(("info", message))
+
+    def add_entry(self, level, message):
+        self.entries.append((level, message))
+
+
+class DummyAuthStatusWidget(QWidget):
+    authenticate_requested = pyqtSignal(str)
+
+    def set_urls(self, urls):
+        return None
+
+    def refresh_status(self):
+        return None
+
+
+class DummyAddUrlsPage(QWidget):
+    start_download = pyqtSignal()
+    cancel_download = pyqtSignal()
+    load_from_file = pyqtSignal()
+    clear_urls = pyqtSignal()
+
+    def __init__(self, **kwargs):
+        parent = kwargs.get("parent")
+        super().__init__(parent)
+        self.download_mode = False
+        self.queue_stats = None
+
+    def set_download_mode(self, active):
+        self.download_mode = active
+
+    def set_queue_stats(self, queued, active, elapsed):
+        self.queue_stats = (queued, active, elapsed)
+
+
+class DummyPage(QWidget):
+    def __init__(self, parent=None, **kwargs):
+        super().__init__(parent)
+
+
+class DummyTrimPage(DummyPage):
+    def cleanup(self):
+        return None
+
+
+class DummySettingsPage(DummyPage):
+    def reload_settings(self):
+        return None
+
+
+def _patch_lightweight_main_window_components(monkeypatch):
     from src.ui import main_window as main_window_module
-    from src.ui.main_window import MainWindow
-
-    class DummyConfigService:
-        def __init__(self):
-            self.values = {}
-
-        def get(self, key, default=None):
-            return self.values.get(key, default)
-
-    class DummyDownloadManager:
-        def __init__(self, download_repo):
-            self.download_repo = download_repo
-            self.is_running = False
-
-    class DummyAuthManager:
-        def __init__(self, parent=None):
-            self.parent = parent
 
     monkeypatch.setattr(main_window_module, "ConfigService", DummyConfigService)
     monkeypatch.setattr(main_window_module, "DownloadManager", DummyDownloadManager)
     monkeypatch.setattr(main_window_module, "AuthManager", DummyAuthManager)
-    monkeypatch.setattr(main_window_module.MainWindow, "_setup_ui", lambda self: None)
-    monkeypatch.setattr(main_window_module.MainWindow, "_setup_menu_bar", lambda self: None)
-    monkeypatch.setattr(main_window_module.MainWindow, "_setup_shortcuts", lambda self: None)
-    monkeypatch.setattr(main_window_module.MainWindow, "_connect_signals", lambda self: None)
-    monkeypatch.setattr(main_window_module.MainWindow, "_setup_quick_look_shortcut", lambda self: None)
+    monkeypatch.setattr(main_window_module, "UrlInputWidget", DummyUrlInputWidget)
+    monkeypatch.setattr(main_window_module, "FilePickerWidget", DummyFilePickerWidget)
+    monkeypatch.setattr(main_window_module, "OutputConfigWidget", DummyOutputConfigWidget)
+    monkeypatch.setattr(main_window_module, "QueueProgressWidget", DummyQueueProgressWidget)
+    monkeypatch.setattr(main_window_module, "ProgressWidget", DummyProgressWidget)
+    monkeypatch.setattr(main_window_module, "DownloadLogWidget", DummyDownloadLogWidget)
+    monkeypatch.setattr(main_window_module, "AuthStatusWidget", DummyAuthStatusWidget)
+    monkeypatch.setattr(main_window_module, "AddUrlsPage", DummyAddUrlsPage)
+    monkeypatch.setattr(main_window_module, "ExtractUrlsPage", DummyPage)
+    monkeypatch.setattr(main_window_module, "ConvertPage", DummyPage)
+    monkeypatch.setattr(main_window_module, "TrimPage", DummyTrimPage)
+    monkeypatch.setattr(main_window_module, "MetadataPage", DummyPage)
+    monkeypatch.setattr(main_window_module, "SortPage", DummyPage)
+    monkeypatch.setattr(main_window_module, "RenamePage", DummyPage)
+    monkeypatch.setattr(main_window_module, "MatchPage", DummyPage)
+    monkeypatch.setattr(main_window_module, "SettingsPage", DummySettingsPage)
+
+
+def _make_window(monkeypatch, *, saved_task_service=None, parent=None):
+    from src.ui.main_window import MainWindow
+
+    _patch_lightweight_main_window_components(monkeypatch)
 
     db = MagicMock()
     db.get_connection.return_value = MagicMock()
     session_svc = MagicMock()
     session_svc.get_pending_session.return_value = None
-    saved_task_svc = MagicMock()
+    session_svc.stop_auto_save.return_value = None
+
     return MainWindow(
-        database=db,
-        session_service=session_svc,
-        saved_task_service=saved_task_svc,
+        db,
+        session_svc,
+        parent,
+        saved_task_service=saved_task_service,
     )
 
 
-def _make_window_with_positional_parent(qapp, monkeypatch):
-    """Create a MainWindow using the legacy positional parent argument."""
-    from PyQt6.QtWidgets import QWidget
-    from src.ui import main_window as main_window_module
-    from src.ui.main_window import MainWindow
-
-    class DummyConfigService:
-        def __init__(self):
-            self.values = {}
-
-        def get(self, key, default=None):
-            return self.values.get(key, default)
-
-    class DummyDownloadManager:
-        def __init__(self, download_repo):
-            self.download_repo = download_repo
-            self.is_running = False
-
-    class DummyAuthManager:
-        def __init__(self, parent=None):
-            self.parent = parent
-
-    monkeypatch.setattr(main_window_module, "ConfigService", DummyConfigService)
-    monkeypatch.setattr(main_window_module, "DownloadManager", DummyDownloadManager)
-    monkeypatch.setattr(main_window_module, "AuthManager", DummyAuthManager)
-    monkeypatch.setattr(main_window_module.MainWindow, "_setup_ui", lambda self: None)
-    monkeypatch.setattr(main_window_module.MainWindow, "_setup_menu_bar", lambda self: None)
-    monkeypatch.setattr(main_window_module.MainWindow, "_setup_shortcuts", lambda self: None)
-    monkeypatch.setattr(main_window_module.MainWindow, "_connect_signals", lambda self: None)
-    monkeypatch.setattr(main_window_module.MainWindow, "_setup_quick_look_shortcut", lambda self: None)
-
-    db = MagicMock()
-    session_svc = MagicMock()
-    parent = QWidget()
-    return MainWindow(db, session_svc, parent), parent
-
-
 def test_main_window_integration(qapp, monkeypatch):
-    """Single consolidated test to minimize teardown crashes."""
-    win = _make_window(qapp, monkeypatch)
-    win.trim_page = type("DummyTrimPage", (), {"cleanup": lambda self: None})()
+    win = _make_window(monkeypatch, saved_task_service=MagicMock())
 
     assert win is not None
-    assert win.saved_task_service is not None
-    assert win.session_service.get_pending_session.return_value is None
-    assert win.database is not None
+    assert win.shell.content_stack.count() == 9
+    assert win.shell.active_tool() == "add_urls"
 
-    # Explicit cleanup to reduce segfault risk
+    expected = [
+        "add_urls",
+        "extract_urls",
+        "convert",
+        "trim",
+        "metadata",
+        "sort",
+        "rename",
+        "match",
+        "settings",
+    ]
+    for key in expected:
+        assert key in win.shell._tool_widgets, f"Tool '{key}' not registered"
+
+    win.shell.set_badge("add_urls", 3)
+    win.shell.set_badge("add_urls", 0)
+
     win.close()
     qapp.processEvents()
     del win
@@ -125,29 +330,54 @@ def test_main_window_integration(qapp, monkeypatch):
 
 
 def test_main_window_accepts_legacy_positional_parent(qapp, monkeypatch):
-    win, parent = _make_window_with_positional_parent(qapp, monkeypatch)
+    parent = QWidget()
+    win = _make_window(monkeypatch, parent=parent)
 
     assert win.parent() is parent
     assert win.saved_task_service is None
+    assert win.shell.active_tool() == "add_urls"
+    assert "trim" in win.shell._tool_widgets
 
-    win.trim_page = type("DummyTrimPage", (), {"cleanup": lambda self: None})()
     win.close()
     qapp.processEvents()
+
+
+def test_build_startup_services_includes_saved_task_service(monkeypatch, tmp_path):
+    import src.main as main_module
+
+    monkeypatch.setattr(main_module, "ConfigService", DummyConfigService)
+
+    database = Database(db_path=str(tmp_path / "startup.sqlite3"))
+    services = main_module.build_startup_services(database)
+
+    assert services["saved_task_service"].repository.db is database
+    assert services["session_service"].session_repo.db is database
+    assert services["saved_task_repo"].db is database
 
 
 def test_page_imports_succeed():
     from src.ui.pages import (
         add_urls_page,
-        extract_urls_page,
         convert_page,
-        trim_page,
-        metadata_page,
-        sort_page,
-        rename_page,
+        extract_urls_page,
         match_page,
+        metadata_page,
+        rename_page,
         settings_page,
+        sort_page,
+        trim_page,
     )
-    assert all([
-        add_urls_page, extract_urls_page, convert_page, trim_page,
-        metadata_page, sort_page, rename_page, match_page, settings_page,
-    ])
+
+    assert all(
+        [
+            add_urls_page,
+            extract_urls_page,
+            convert_page,
+            trim_page,
+            metadata_page,
+            sort_page,
+            rename_page,
+            match_page,
+            settings_page,
+        ]
+    )

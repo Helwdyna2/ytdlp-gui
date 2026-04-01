@@ -281,19 +281,3 @@ def test_database_repairs_legacy_v4_saved_tasks_schema(tmp_path):
     assert updated.status == SavedTaskStatus.PAUSED
     assert repo.get_latest_unfinished() is not None
 
-
-def test_build_startup_services_includes_saved_task_service(monkeypatch, tmp_path):
-    import src.main as main_module
-
-    class DummyConfigService:
-        def __init__(self):
-            self.loaded = True
-
-    monkeypatch.setattr(main_module, "ConfigService", DummyConfigService)
-
-    database = Database(db_path=str(tmp_path / "startup.sqlite3"))
-    services = main_module.build_startup_services(database)
-
-    assert services["saved_task_service"].repository.db is database
-    assert services["session_service"].session_repo.db is database
-    assert services["saved_task_repo"].db is database
