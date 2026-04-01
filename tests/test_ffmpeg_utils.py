@@ -1,6 +1,14 @@
 """Tests for shared FFmpeg utility functions."""
 
-from src.utils.ffmpeg_utils import calculate_ffmpeg_eta, extract_ffmpeg_error
+from types import SimpleNamespace
+
+from src.utils.ffmpeg_utils import (
+    HARDWARE_PROBE_SOURCE,
+    calculate_ffmpeg_eta,
+    extract_ffmpeg_error,
+    find_ffmpeg,
+    probe_hardware_encoder,
+)
 
 
 class TestCalculateEta:
@@ -64,3 +72,76 @@ class TestExtractError:
         output = "x" * 300
         result = extract_ffmpeg_error(output)
         assert len(result) <= 200
+
+
+class TestProbeHardwareEncoder:
+    """Tests for hardware encoder probing."""
+
+    def test_probe_uses_supported_test_source(self, monkeypatch):
+        calls = []
+
+        monkeypatch.setattr("src.utils.ffmpeg_utils.find_ffmpeg", lambda: "ffmpeg")
+        monkeypatch.setattr(
+            "src.utils.ffmpeg_utils.get_available_encoders",
+            lambda: ["h264_nvenc"],
+        )
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr("src.utils.ffmpeg_utils.subprocess.run", fake_run)
+
+        available, error = probe_hardware_encoder("h264_nvenc")
+
+        assert available is True
+        assert error is None
+        assert calls
+        cmd = calls[0][0]
+        assert HARDWARE_PROBE_SOURCE in cmd
+        assert "-frames:v" in cmd
+        assert "1" in cmd
+
+    def test_probe_returns_ffmpeg_failure_summary(self, monkeypatch):
+        monkeypatch.setattr("src.utils.ffmpeg_utils.find_ffmpeg", lambda: "ffmpeg")
+        monkeypatch.setattr(
+            "src.utils.ffmpeg_utils.get_available_encoders",
+            lambda: ["h264_nvenc"],
+        )
+        monkeypatch.setattr(
+            "src.utils.ffmpeg_utils.subprocess.run",
+            lambda cmd, **kwargs: SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr="InitializeEncoder failed: invalid param (8)",
+            ),
+        )
+
+        available, error = probe_hardware_encoder("h264_nvenc")
+
+        assert available is False
+        assert error == "InitializeEncoder failed: invalid param (8)"
+
+
+class TestFindFfmpeg:
+    """Tests for FFmpeg binary discovery."""
+
+    def test_find_ffmpeg_checks_winget_paths_on_windows(self, monkeypatch, tmp_path):
+        winget_bin = (
+            tmp_path
+            / "Microsoft"
+            / "WinGet"
+            / "Packages"
+            / "BtbN.FFmpeg.GPL_test"
+            / "ffmpeg-build"
+            / "bin"
+        )
+        winget_bin.mkdir(parents=True)
+        ffmpeg_path = winget_bin / "ffmpeg.exe"
+        ffmpeg_path.write_text("")
+
+        monkeypatch.setattr("src.utils.ffmpeg_utils.sys.platform", "win32")
+        monkeypatch.setattr("src.utils.ffmpeg_utils.shutil.which", lambda name: None)
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+        assert find_ffmpeg() == str(ffmpeg_path)

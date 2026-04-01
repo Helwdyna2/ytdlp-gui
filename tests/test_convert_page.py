@@ -298,9 +298,30 @@ def test_convert_page_hw_combo_disabled_for_unsupported_target(
     page = ConvertPage()
     page._codec_combo.setCurrentIndex(2)
 
-    assert _combo_items(page._hw_combo) == ["None"]
+    assert _combo_items(page._hw_combo) == ["Not available for this format"]
     assert not page._hw_combo.isEnabled()
     assert not page._source_codec_filter_check.isEnabled()
+    assert "only available for H.264 and H.265" in page._hw_status_label.text()
+
+
+def test_convert_page_hw_combo_explains_missing_hardware_detection(
+    qapp, monkeypatch, fake_config_service, fake_ffprobe_worker, convert_page_module
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+    monkeypatch.setattr(
+        convert_page_module,
+        "get_hardware_detection_message",
+        lambda codec: "FFmpeg found hardware encoders, but validation failed on this system.",
+    )
+
+    page = ConvertPage()
+
+    assert _combo_items(page._hw_combo) == ["No hardware acceleration detected"]
+    assert not page._hw_combo.isEnabled()
+    assert "validation failed" in page._hw_status_label.text()
+    assert page._hw_combo.toolTip() == page._hw_status_label.text()
 
 
 def test_convert_page_ignores_saved_unsupported_hw_selection(

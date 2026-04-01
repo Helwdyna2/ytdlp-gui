@@ -1,6 +1,7 @@
 """FFmpeg and ffprobe utility functions."""
 
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -10,6 +11,32 @@ from typing import Optional, Tuple
 from .platform_utils import get_subprocess_kwargs
 
 logger = logging.getLogger(__name__)
+
+
+HARDWARE_PROBE_SOURCE = "testsrc2=size=320x240:rate=30:duration=1"
+
+
+def _windows_ffmpeg_candidates(executable_name: str) -> list[str]:
+    """Return likely Windows install paths, including winget-managed locations."""
+    candidates = [
+        rf"C:\ffmpeg\bin\{executable_name}",
+        rf"C:\Program Files\ffmpeg\bin\{executable_name}",
+        rf"C:\Program Files (x86)\ffmpeg\bin\{executable_name}",
+    ]
+
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        return candidates
+
+    winget_root = Path(local_app_data) / "Microsoft" / "WinGet"
+    candidates.append(str(winget_root / "Links" / executable_name))
+
+    packages_root = winget_root / "Packages"
+    if packages_root.is_dir():
+        for path in sorted(packages_root.glob(f"**/{executable_name}"), reverse=True):
+            candidates.append(str(path))
+
+    return candidates
 
 
 def find_ffmpeg() -> Optional[str]:
@@ -34,11 +61,7 @@ def find_ffmpeg() -> Optional[str]:
             "/opt/local/bin/ffmpeg",
         ]
     elif sys.platform == "win32":  # Windows
-        common_paths = [
-            r"C:\ffmpeg\bin\ffmpeg.exe",
-            r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
-            r"C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe",
-        ]
+        common_paths = _windows_ffmpeg_candidates("ffmpeg.exe")
     else:  # Linux
         common_paths = [
             "/usr/bin/ffmpeg",
@@ -74,11 +97,7 @@ def find_ffprobe() -> Optional[str]:
             "/opt/local/bin/ffprobe",
         ]
     elif sys.platform == "win32":  # Windows
-        common_paths = [
-            r"C:\ffmpeg\bin\ffprobe.exe",
-            r"C:\Program Files\ffmpeg\bin\ffprobe.exe",
-            r"C:\Program Files (x86)\ffmpeg\bin\ffprobe.exe",
-        ]
+        common_paths = _windows_ffmpeg_candidates("ffprobe.exe")
     else:  # Linux
         common_paths = [
             "/usr/bin/ffprobe",
@@ -172,29 +191,48 @@ def get_available_encoders() -> list[str]:
     return []
 
 
-def is_hardware_encoder_available(encoder_name: str) -> bool:
+def _summarize_probe_failure(output: str) -> str:
+    """Extract a concise, user-facing reason from FFmpeg probe output."""
+    keywords = (
+        "initializeencoder failed",
+        "error while opening encoder",
+        "failed to create hardware device context",
+        "failed to open",
+        "not supported",
+        "conversion failed",
+        "device",
+        "error",
+        "failed",
+    )
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    for line in lines:
+        lowered = line.lower()
+        if any(keyword in lowered for keyword in keywords):
+            return line
+    if lines:
+        return lines[-1]
+    return "Unknown FFmpeg error"
+
+
+def probe_hardware_encoder(encoder_name: str) -> tuple[bool, Optional[str]]:
     """
-    Check if a specific hardware encoder is available.
+    Check whether a hardware encoder is listed and can complete a minimal encode.
 
     Args:
         encoder_name: Name of the encoder (e.g., 'h264_nvenc')
 
     Returns:
-        True if the encoder is available and working.
+        Tuple of (is_available, failure_reason).
     """
     ffmpeg_path = find_ffmpeg()
     if not ffmpeg_path:
-        return False
+        return False, "FFmpeg not found"
 
-    # Quick check if encoder is listed
     encoders = get_available_encoders()
     if encoder_name not in encoders:
-        return False
+        return False, "Encoder not listed by FFmpeg"
 
-    # For hardware encoders, we need to actually test them
-    # because they might be listed but not have working hardware
     try:
-        # Run a minimal encode test
         result = subprocess.run(
             [
                 ffmpeg_path,
@@ -202,7 +240,9 @@ def is_hardware_encoder_available(encoder_name: str) -> bool:
                 "-f",
                 "lavfi",
                 "-i",
-                "nullsrc=s=64x64:d=0.1",
+                HARDWARE_PROBE_SOURCE,
+                "-frames:v",
+                "1",
                 "-c:v",
                 encoder_name,
                 "-f",
@@ -216,10 +256,30 @@ def is_hardware_encoder_available(encoder_name: str) -> bool:
             timeout=10,
             **get_subprocess_kwargs(),
         )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        if result.returncode == 0:
+            return True, None
+
+        failure_output = result.stderr or result.stdout
+        return False, _summarize_probe_failure(failure_output)
+    except subprocess.TimeoutExpired:
+        return False, "Probe timed out"
+    except subprocess.SubprocessError as e:
         logger.debug(f"Hardware encoder {encoder_name} test failed: {e}")
-        return False
+        return False, str(e)
+
+
+def is_hardware_encoder_available(encoder_name: str) -> bool:
+    """
+    Check if a specific hardware encoder is available.
+
+    Args:
+        encoder_name: Name of the encoder (e.g., 'h264_nvenc')
+
+    Returns:
+        True if the encoder is available and working.
+    """
+    is_available, _ = probe_hardware_encoder(encoder_name)
+    return is_available
 
 
 def calculate_ffmpeg_eta(duration: float, current_time: float, speed_str: str) -> str:

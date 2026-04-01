@@ -2,9 +2,9 @@
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional
 
-from .ffmpeg_utils import get_available_encoders, is_hardware_encoder_available
+from .ffmpeg_utils import find_ffmpeg, get_available_encoders, probe_hardware_encoder
 from .constants import HARDWARE_ENCODERS
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,9 @@ HARDWARE_DISPLAY_NAMES = {
 }
 
 
+_cached_probe_failures: Dict[str, str] = {}
+
+
 def detect_hardware_encoders() -> List[HardwareEncoder]:
     """
     Detect all available hardware encoders on the system.
@@ -37,7 +40,10 @@ def detect_hardware_encoders() -> List[HardwareEncoder]:
     Returns:
         List of available HardwareEncoder objects.
     """
+    global _cached_probe_failures
+
     available_encoders = []
+    probe_failures: Dict[str, str] = {}
     all_encoders = get_available_encoders()
     
     for hw_name, codecs in HARDWARE_ENCODERS.items():
@@ -56,10 +62,14 @@ def detect_hardware_encoders() -> List[HardwareEncoder]:
         hevc_works = False
         
         if h264_listed:
-            h264_works = is_hardware_encoder_available(h264_encoder)
+            h264_works, h264_error = probe_hardware_encoder(h264_encoder)
+            if h264_error:
+                probe_failures[h264_encoder] = h264_error
             
         if hevc_listed:
-            hevc_works = is_hardware_encoder_available(hevc_encoder)
+            hevc_works, hevc_error = probe_hardware_encoder(hevc_encoder)
+            if hevc_error:
+                probe_failures[hevc_encoder] = hevc_error
         
         if h264_works or hevc_works:
             encoder = HardwareEncoder(
@@ -73,7 +83,8 @@ def detect_hardware_encoders() -> List[HardwareEncoder]:
             available_encoders.append(encoder)
             logger.info(f"Hardware encoder detected: {encoder.display_name} "
                        f"(H.264: {h264_works}, HEVC: {hevc_works})")
-    
+
+    _cached_probe_failures = probe_failures
     return available_encoders
 
 
@@ -152,6 +163,39 @@ def get_encoder_for_codec(hardware_encoder: Optional[HardwareEncoder],
         return "libx264"
 
 
+def get_hardware_detection_message(codec: str) -> str:
+    """Get a short explanation for why no hardware option is available."""
+    get_cached_hardware_encoders()
+
+    if codec not in {"h264", "hevc"}:
+        return "Hardware acceleration is only available for H.264 and H.265 (HEVC) output."
+
+    failed_encoders: List[str] = []
+    for hw_name, codecs in HARDWARE_ENCODERS.items():
+        encoder_name = codecs.get(codec, "")
+        if not encoder_name:
+            continue
+        failure = _cached_probe_failures.get(encoder_name)
+        if failure:
+            failed_encoders.append(
+                f"{HARDWARE_DISPLAY_NAMES.get(hw_name, hw_name.upper())}: {failure}"
+            )
+
+    if failed_encoders:
+        joined = "; ".join(failed_encoders[:2])
+        if len(failed_encoders) > 2:
+            joined += "; ..."
+        return (
+            "FFmpeg found hardware encoders, but validation failed on this system. "
+            f"{joined}"
+        )
+
+    if not find_ffmpeg():
+        return "FFmpeg was not found. Install FFmpeg to enable hardware acceleration."
+
+    return "No compatible hardware encoders were detected for this codec."
+
+
 # Cached result to avoid repeated detection
 _cached_encoders: Optional[List[HardwareEncoder]] = None
 
@@ -171,5 +215,6 @@ def get_cached_hardware_encoders() -> List[HardwareEncoder]:
 
 def clear_encoder_cache() -> None:
     """Clear the cached encoder detection results."""
-    global _cached_encoders
+    global _cached_encoders, _cached_probe_failures
     _cached_encoders = None
+    _cached_probe_failures = {}

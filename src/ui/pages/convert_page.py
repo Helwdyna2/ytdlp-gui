@@ -45,6 +45,7 @@ from ...utils.hardware_accel import (
     HardwareEncoder,
     get_cached_hardware_encoders,
     get_compatible_hardware_encoders,
+    get_hardware_detection_message,
 )
 from ..components.page_header import PageHeader
 from ..components.split_layout import SplitLayout
@@ -404,6 +405,10 @@ class ConvertPage(QWidget):
         sl.addWidget(QLabel("Hardware Acceleration"))
         self._hw_combo = QComboBox()
         sl.addWidget(self._hw_combo)
+        self._hw_status_label = QLabel()
+        self._hw_status_label.setWordWrap(True)
+        self._hw_status_label.setVisible(False)
+        sl.addWidget(self._hw_status_label)
 
         self._source_codec_filter_check = QCheckBox("Only convert source codec")
         sl.addWidget(self._source_codec_filter_check)
@@ -840,18 +845,26 @@ class ConvertPage(QWidget):
     ) -> None:
         """Populate the hardware acceleration combo for the selected codec."""
         output_codec = self._get_selected_output_codec()
+        hardware_supported = output_codec in {"h264", "hevc"}
         compatible_encoders = get_compatible_hardware_encoders(
             output_codec, self._hardware_encoders
         )
 
         self._hw_combo.blockSignals(True)
         self._hw_combo.clear()
-        self._hw_combo.addItem("None", None)
-        for encoder in compatible_encoders:
-            self._hw_combo.addItem(self._format_hardware_label(encoder), encoder.name)
+        if compatible_encoders:
+            self._hw_combo.addItem("None", None)
+            for encoder in compatible_encoders:
+                self._hw_combo.addItem(
+                    self._format_hardware_label(encoder), encoder.name
+                )
+        elif hardware_supported:
+            self._hw_combo.addItem("No hardware acceleration detected", None)
+        else:
+            self._hw_combo.addItem("Not available for this format", None)
 
         selected_index = 0
-        if preferred_name:
+        if compatible_encoders and preferred_name:
             preferred_index = self._hw_combo.findData(preferred_name)
             if preferred_index >= 0:
                 selected_index = preferred_index
@@ -862,6 +875,12 @@ class ConvertPage(QWidget):
 
         self._hw_combo.setCurrentIndex(selected_index)
         self._hw_combo.setEnabled(bool(compatible_encoders))
+        status_message = ""
+        if not compatible_encoders:
+            status_message = get_hardware_detection_message(output_codec)
+        self._hw_combo.setToolTip(status_message)
+        self._hw_status_label.setText(status_message)
+        self._hw_status_label.setVisible(bool(status_message))
         self._hw_combo.blockSignals(False)
 
     def _refresh_source_codec_scan(self) -> None:
