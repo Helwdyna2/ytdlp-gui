@@ -60,6 +60,7 @@ DEFAULT_CONFIG = {
         "confirm_on_exit": True,
         "clear_completed_delay_ms": 2000,
         "download_log_auto_scroll": True,  # Auto-scroll download log
+        "clear_transient_data_on_exit": False,
     },
     "convert": {
         "output_dir": "",
@@ -337,8 +338,8 @@ class ConfigService:
     def queue_save(self, delay_ms: Optional[int] = None) -> None:
         """Queue a debounced save for bursty UI updates."""
         delay_seconds = (
-            (delay_ms if delay_ms is not None else self.DEFAULT_SAVE_DELAY_MS) / 1000.0
-        )
+            delay_ms if delay_ms is not None else self.DEFAULT_SAVE_DELAY_MS
+        ) / 1000.0
 
         with self._config_lock:
             self._cancel_queued_save_locked()
@@ -374,13 +375,11 @@ class ConfigService:
             # Create temp file in same directory for atomic rename
             config_dir = os.path.dirname(self.config_path)
             temp_fd, temp_path = tempfile.mkstemp(
-                suffix='.tmp',
-                prefix='config_',
-                dir=config_dir
+                suffix=".tmp", prefix="config_", dir=config_dir
             )
 
             # Write to temp file with fsync for durability
-            with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+            with os.fdopen(temp_fd, "w", encoding="utf-8") as f:
                 temp_fd = None  # fdopen now owns the fd
                 json.dump(config_to_save, f, indent=2)
                 f.flush()

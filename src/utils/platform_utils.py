@@ -1,6 +1,7 @@
 """Platform-specific utilities for portable application paths."""
 
 import logging
+import shutil
 import sys
 import os
 import subprocess
@@ -111,6 +112,16 @@ def ensure_dirs():
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
+
+
+def clear_transient_data():
+    """Clear transient runtime data on exit."""
+    log_dir = get_log_dir()
+    if log_dir.exists():
+        shutil.rmtree(log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = get_data_dir() / ".running.lock"
+    lock_file.unlink(missing_ok=True)
 
 
 def quick_look_file(file_path: str) -> bool:

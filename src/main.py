@@ -310,6 +310,8 @@ def main():
 
         # Clean shutdown
         session_service.stop_auto_save()
+        if config_service.get("behavior.clear_transient_data_on_exit"):
+            platform_utils.clear_transient_data()
         crash_service.release_lock()
         app.cleanup()
         database.close()
