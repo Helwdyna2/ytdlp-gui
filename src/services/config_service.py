@@ -66,6 +66,8 @@ DEFAULT_CONFIG = {
         "output_dir": "",
         "codec": "h264",
         "resolution": "source",
+        "audio_mode": "copy",
+        "frame_rate": "source",
         "crf": 23,
         "preset": "medium",
         "use_hardware_accel": False,

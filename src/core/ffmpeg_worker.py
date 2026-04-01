@@ -166,8 +166,12 @@ class FFmpegWorker(QThread):
             if scale_filter:
                 cmd.extend(["-vf", scale_filter])
 
+            output_frame_rate = self._normalized_frame_rate()
+            if output_frame_rate:
+                cmd.extend(["-r", output_frame_rate])
+
             cmd.extend(self._build_video_quality_args(encoder))
-            cmd.extend(self._build_mux_audio_args(output_codec))
+            cmd.extend(self._build_video_audio_args())
 
         # Progress reporting
         cmd.extend(["-progress", "pipe:1"])
@@ -257,11 +261,11 @@ class FFmpegWorker(QThread):
 
         return ["-crf", str(self._config.crf_value), "-preset", self._config.preset]
 
-    def _build_mux_audio_args(self, output_codec: str) -> list[str]:
+    def _build_video_audio_args(self) -> list[str]:
         """Build audio arguments for video container outputs."""
-        if output_codec == "vp9":
-            return ["-c:a", "libopus", "-b:a", "192k"]
-        return ["-c:a", "aac", "-b:a", "192k"]
+        if self._config.audio_mode == "none":
+            return ["-an"]
+        return ["-c:a", "copy"]
 
     def _build_audio_only_args(self, output_codec: str) -> list[str]:
         """Build audio codec arguments for audio-only outputs."""
@@ -272,7 +276,7 @@ class FFmpegWorker(QThread):
         return ["-c:a", "aac", "-b:a", "192k"]
 
     def _build_scale_filter(self, output_codec: str) -> Optional[str]:
-        """Build a scale/pad filter for the selected output resolution."""
+        """Build an aspect-preserving scale filter for the selected output resolution."""
         if output_codec not in {"h264", "hevc", "vp9"}:
             return None
 
@@ -280,16 +284,29 @@ class FFmpegWorker(QThread):
         if not resolution:
             return None
 
-        match = re.fullmatch(r"(\d+)x(\d+)", resolution)
+        match = re.fullmatch(r"(?:(horizontal|vertical):)?(\d{3,4})p", resolution)
         if not match:
             logger.warning("Ignoring invalid output resolution: %s", resolution)
             return None
 
-        width, height = match.groups()
+        orientation, target_height = match.groups()
+        if orientation == "horizontal":
+            return f"scale=-2:{target_height}"
+        if orientation == "vertical":
+            return f"scale={target_height}:-2"
+
         return (
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease:"
-            f"force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+            "scale="
+            f"'if(gte(iw,ih),-2,{target_height})':"
+            f"'if(gte(iw,ih),{target_height},-2)'"
         )
+
+    def _normalized_frame_rate(self) -> Optional[str]:
+        """Normalize the requested output frame rate."""
+        frame_rate = (self._config.frame_rate or "").strip().lower()
+        if not frame_rate or frame_rate == "source":
+            return None
+        return frame_rate
 
     def _nvenc_preset(self, preset: str) -> str:
         """Map standard preset to NVENC preset."""

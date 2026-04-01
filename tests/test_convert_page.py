@@ -40,6 +40,8 @@ def fake_config_service(monkeypatch, convert_page_module):
             self.values = {
                 "convert.codec": "h264",
                 "convert.resolution": "source",
+                "convert.audio_mode": "copy",
+                "convert.frame_rate": "source",
                 "convert.crf": 23,
                 "convert.preset": "medium",
                 "convert.output_dir": "",
@@ -110,8 +112,10 @@ def fake_ffprobe_worker(monkeypatch, convert_page_module):
                     VideoMetadata(
                         file_path=path,
                         codec=metadata.get("codec", ""),
+                        audio_codec=metadata.get("audio_codec", ""),
                         width=metadata.get("width", 0),
                         height=metadata.get("height", 0),
+                        fps=metadata.get("fps", 0.0),
                     )
                 )
             self.completed.emit(results)
@@ -567,9 +571,9 @@ def test_convert_page_resolution_defaults_to_horizontal_presets(
     page = ConvertPage()
 
     assert page._resolution_combo.itemText(0) == "Same as source"
-    assert page._resolution_combo.itemText(1) == "3840x2160"
-    assert page._resolution_combo.itemText(4) == "1280x720"
-    assert page._resolution_combo.itemText(6) == "2160x3840 (Vertical override)"
+    assert page._resolution_combo.itemText(1) == "2160p"
+    assert page._resolution_combo.itemText(4) == "720p"
+    assert page._resolution_combo.itemText(6) == "2160p (Vertical override)"
 
 
 def test_convert_page_resolution_switches_to_vertical_when_source_is_vertical(
@@ -585,9 +589,9 @@ def test_convert_page_resolution_switches_to_vertical_when_source_is_vertical(
     page._file_list._add_paths(["/tmp/clip.mp4"])
     qapp.processEvents()
 
-    assert page._resolution_combo.itemText(1) == "2160x3840"
-    assert page._resolution_combo.itemText(4) == "720x1280"
-    assert page._resolution_combo.itemText(6) == "3840x2160 (Horizontal override)"
+    assert page._resolution_combo.itemText(1) == "2160p"
+    assert page._resolution_combo.itemText(4) == "720p"
+    assert page._resolution_combo.itemText(6) == "2160p (Horizontal override)"
 
 
 def test_convert_page_build_config_uses_selected_output_resolution(
@@ -596,12 +600,123 @@ def test_convert_page_build_config_uses_selected_output_resolution(
     from src.ui.pages.convert_page import ConvertPage
 
     page = ConvertPage()
-    index = page._resolution_combo.findText("1920x1080")
+    index = page._resolution_combo.findText("1080p")
     page._resolution_combo.setCurrentIndex(index)
 
     config = page._build_config()
 
-    assert config.output_resolution == "1920x1080"
+    assert config.output_resolution == "1080p"
+
+
+def test_convert_page_build_config_includes_audio_mode_and_frame_rate(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    page = ConvertPage()
+    page._audio_mode_combo.setCurrentIndex(page._audio_mode_combo.findData("none"))
+    page._frame_rate_combo.setCurrentIndex(page._frame_rate_combo.findData("29.97"))
+
+    config = page._build_config()
+
+    assert config.audio_mode == "none"
+    assert config.frame_rate == "29.97"
+
+
+def test_convert_page_blocks_incompatible_audio_copy_for_selected_container(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/clip.mp4": {
+            "codec": "h264",
+            "audio_codec": "aac",
+            "width": 1920,
+            "height": 1080,
+        },
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/clip.mp4"])
+    qapp.processEvents()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("vp9"))
+
+    assert page._start_btn.isEnabled() is False
+    assert "Copy audio is unavailable" in page._preflight_status_label.text()
+
+
+def test_convert_page_warns_when_audio_copy_is_incompatible_on_start(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_conversion_manager,
+    convert_page_module,
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    warnings = []
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+    monkeypatch.setattr(
+        convert_page_module.QMessageBox,
+        "warning",
+        lambda *args: warnings.append((args[1], args[2])),
+    )
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/clip.mp4": {
+            "codec": "h264",
+            "audio_codec": "aac",
+            "width": 1920,
+            "height": 1080,
+        },
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/clip.mp4"])
+    qapp.processEvents()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("vp9"))
+
+    page._on_start()
+
+    assert fake_conversion_manager.instances == []
+    assert warnings
+    assert warnings[0][0] == "Audio Copy Not Supported"
+
+
+def test_convert_page_no_audio_allows_incompatible_source_audio(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_conversion_manager,
+    convert_page_module,
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/clip.mp4": {
+            "codec": "h264",
+            "audio_codec": "aac",
+            "width": 1920,
+            "height": 1080,
+        },
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/clip.mp4"])
+    qapp.processEvents()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("vp9"))
+    page._audio_mode_combo.setCurrentIndex(page._audio_mode_combo.findData("none"))
+
+    assert page._start_btn.isEnabled() is True
+
+    page._on_start()
+
+    manager = fake_conversion_manager.instances[-1]
+    assert manager.config.audio_mode == "none"
 
 
 def test_convert_page_shows_preview_tree_for_nested_folder_inputs(

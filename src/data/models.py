@@ -221,6 +221,7 @@ class VideoMetadata:
     height: int = 0
     fps: float = 0.0
     codec: str = ""
+    audio_codec: str = ""
     bitrate: int = 0
     duration: float = 0.0
     file_size: int = 0
@@ -308,7 +309,9 @@ class ConversionConfig:
     preset: str = "medium"  # ultrafast to veryslow
     use_hardware_accel: bool = False
     hardware_encoder: Optional[str] = None  # nvenc, amf, qsv
-    output_resolution: Optional[str] = None  # e.g. "1920x1080"
+    output_resolution: Optional[str] = None  # e.g. "1080p" or "vertical:1080p"
+    audio_mode: str = "copy"  # copy or none
+    frame_rate: Optional[str] = None  # e.g. "29.97"
     output_dir: Optional[str] = None
 
 

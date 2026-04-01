@@ -72,20 +72,31 @@ OUTPUT_FORMATS = [
 FILE_PATH_ROLE = int(Qt.ItemDataRole.UserRole)
 SOURCE_ROOT_ROLE = FILE_PATH_ROLE + 1
 RESOLUTION_DATA_ROLE = SOURCE_ROOT_ROLE + 1
+AUDIO_MODE_DATA_ROLE = RESOLUTION_DATA_ROLE + 1
+FRAME_RATE_DATA_ROLE = AUDIO_MODE_DATA_ROLE + 1
 
 SAME_AS_SOURCE_RESOLUTION = "source"
-HORIZONTAL_RESOLUTIONS = [
-    "3840x2160",
-    "2560x1440",
-    "1920x1080",
-    "1280x720",
+SAME_AS_SOURCE_FRAME_RATE = "source"
+DEFAULT_AUDIO_MODE = "copy"
+DEFAULT_FRAME_RATE = SAME_AS_SOURCE_FRAME_RATE
+AUDIO_MODE_OPTIONS = [
+    ("Copy audio", "copy"),
+    ("No audio", "none"),
 ]
-VERTICAL_RESOLUTIONS = [
-    "2160x3840",
-    "1440x2560",
-    "1080x1920",
-    "720x1280",
+FRAME_RATE_OPTIONS = [
+    ("Same as source", SAME_AS_SOURCE_FRAME_RATE),
+    ("23.976 fps", "23.976"),
+    ("24 fps", "24"),
+    ("25 fps", "25"),
+    ("29.97 fps", "29.97"),
+    ("30 fps", "30"),
+    ("48 fps", "48"),
+    ("50 fps", "50"),
+    ("59.94 fps", "59.94"),
+    ("60 fps", "60"),
 ]
+HORIZONTAL_RESOLUTIONS = ["2160p", "1440p", "1080p", "720p"]
+VERTICAL_RESOLUTIONS = ["2160p", "1440p", "1080p", "720p"]
 ORIENTATION_RESOLUTION_OPTIONS = {
     "horizontal": HORIZONTAL_RESOLUTIONS,
     "vertical": VERTICAL_RESOLUTIONS,
@@ -94,6 +105,8 @@ OPPOSITE_ORIENTATION = {
     "horizontal": "vertical",
     "vertical": "horizontal",
 }
+MP4_COPY_COMPATIBLE_AUDIO_CODECS = {"aac", "mp3", "ac3", "eac3", "alac"}
+WEBM_COPY_COMPATIBLE_AUDIO_CODECS = {"opus", "vorbis"}
 
 
 class FileListWidget(QWidget):
@@ -484,6 +497,24 @@ class ConvertPage(QWidget):
         self._refresh_resolution_options()
         sl.addWidget(self._resolution_combo)
 
+        sl.addWidget(QLabel("Audio"))
+        self._audio_mode_combo = QComboBox()
+        self._audio_mode_combo.setToolTip(
+            "Video outputs can either copy the source audio track or drop audio entirely."
+        )
+        for label, mode in AUDIO_MODE_OPTIONS:
+            self._audio_mode_combo.addItem(label, mode)
+        sl.addWidget(self._audio_mode_combo)
+
+        sl.addWidget(QLabel("Frame Rate"))
+        self._frame_rate_combo = QComboBox()
+        self._frame_rate_combo.setToolTip(
+            "Choose a fixed output frame rate or keep the source frame rate."
+        )
+        for label, value in FRAME_RATE_OPTIONS:
+            self._frame_rate_combo.addItem(label, value)
+        sl.addWidget(self._frame_rate_combo)
+
         # Quality
         sl.addWidget(QLabel("Quality"))
         quality_row = QHBoxLayout()
@@ -569,6 +600,8 @@ class ConvertPage(QWidget):
         self._crf_slider.valueChanged.connect(self._on_crf_changed)
         self._codec_combo.currentIndexChanged.connect(self._on_output_codec_changed)
         self._resolution_combo.currentIndexChanged.connect(self._on_settings_changed)
+        self._audio_mode_combo.currentIndexChanged.connect(self._on_settings_changed)
+        self._frame_rate_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._preset_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._hw_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._source_codec_filter_check.toggled.connect(self._on_settings_changed)
@@ -596,6 +629,18 @@ class ConvertPage(QWidget):
                 self._config_service.get("convert.resolution", SAME_AS_SOURCE_RESOLUTION)
             )
             self._set_selected_resolution(resolution)
+
+            audio_mode = self._normalize_audio_mode(
+                self._config_service.get("convert.audio_mode", DEFAULT_AUDIO_MODE)
+            )
+            self._set_selected_audio_mode(audio_mode)
+
+            frame_rate = self._normalize_frame_rate_value(
+                self._config_service.get(
+                    "convert.frame_rate", SAME_AS_SOURCE_FRAME_RATE
+                )
+            )
+            self._set_selected_frame_rate(frame_rate)
 
             crf = self._config_service.get("convert.crf", DEFAULT_CRF)
             self._crf_slider.setValue(crf)
@@ -630,6 +675,8 @@ class ConvertPage(QWidget):
         hardware_encoder = self._hw_combo.currentData()
         self._config_service.set("convert.codec", codec)
         self._config_service.set("convert.resolution", self._get_selected_resolution())
+        self._config_service.set("convert.audio_mode", self._get_selected_audio_mode())
+        self._config_service.set("convert.frame_rate", self._get_selected_frame_rate())
         self._config_service.set("convert.crf", self._crf_slider.value())
         self._config_service.set("convert.preset", self._preset_combo.currentText())
         self._config_service.set(
@@ -678,6 +725,7 @@ class ConvertPage(QWidget):
     def _on_settings_changed(self) -> None:
         """Save settings on any change."""
         self._save_settings()
+        self._update_start_button_state()
 
     def _on_browse_output(self) -> None:
         """Browse for output directory."""
@@ -757,6 +805,24 @@ class ConvertPage(QWidget):
                 "Unsupported Source Format",
                 "Same as source is only available for H.264, H.265, VP9, MP3, AAC, and FLAC inputs.\n\n"
                 f"Unsupported files:\n" + "\n".join(unsupported_names) + suffix,
+            )
+            return
+
+        incompatible_audio_paths = self._incompatible_audio_copy_paths(files_to_convert)
+        if incompatible_audio_paths:
+            incompatible_names = [Path(path).name for path in incompatible_audio_paths[:5]]
+            remaining = len(incompatible_audio_paths) - len(incompatible_names)
+            suffix = ""
+            if remaining > 0:
+                suffix = f"\n...and {remaining} more file(s)."
+            output_label = self._codec_combo.currentText()
+            QMessageBox.warning(
+                self,
+                "Audio Copy Not Supported",
+                "The selected output container cannot copy one or more source audio tracks. "
+                "Choose No audio or use files with a compatible audio codec.\n\n"
+                f"Output format: {output_label}\n\n"
+                f"Affected files:\n" + "\n".join(incompatible_names) + suffix,
             )
             return
 
@@ -1026,8 +1092,36 @@ class ConvertPage(QWidget):
         if normalized == SAME_AS_SOURCE_RESOLUTION:
             return SAME_AS_SOURCE_RESOLUTION
 
-        combined = HORIZONTAL_RESOLUTIONS + VERTICAL_RESOLUTIONS
+        legacy_map = {
+            "3840x2160": "2160p",
+            "2560x1440": "1440p",
+            "1920x1080": "1080p",
+            "1280x720": "720p",
+            "2160x3840": "vertical:2160p",
+            "1440x2560": "vertical:1440p",
+            "1080x1920": "vertical:1080p",
+            "720x1280": "vertical:720p",
+        }
+        normalized = legacy_map.get(normalized, normalized)
+
+        combined = set(HORIZONTAL_RESOLUTIONS)
+        combined.update(f"horizontal:{resolution}" for resolution in HORIZONTAL_RESOLUTIONS)
+        combined.update(f"vertical:{resolution}" for resolution in VERTICAL_RESOLUTIONS)
         return normalized if normalized in combined else SAME_AS_SOURCE_RESOLUTION
+
+    def _normalize_audio_mode(self, value: Optional[str]) -> str:
+        """Normalize stored audio mode values."""
+        normalized = (value or "").strip().lower()
+        supported_values = {mode for _, mode in AUDIO_MODE_OPTIONS}
+        return normalized if normalized in supported_values else DEFAULT_AUDIO_MODE
+
+    def _normalize_frame_rate_value(self, value: Optional[str]) -> str:
+        """Normalize stored output frame rate values."""
+        normalized = (value or "").strip().lower()
+        supported_values = {frame_rate for _, frame_rate in FRAME_RATE_OPTIONS}
+        if normalized in supported_values:
+            return normalized
+        return SAME_AS_SOURCE_FRAME_RATE
 
     def _set_selected_output_codec(self, codec: str) -> None:
         """Set the selected output codec."""
@@ -1040,11 +1134,33 @@ class ConvertPage(QWidget):
         resolution = self._resolution_combo.currentData(RESOLUTION_DATA_ROLE)
         return self._normalize_resolution_value(resolution)
 
+    def _get_selected_audio_mode(self) -> str:
+        """Get the selected audio mode."""
+        audio_mode = self._audio_mode_combo.currentData()
+        return self._normalize_audio_mode(audio_mode)
+
+    def _get_selected_frame_rate(self) -> str:
+        """Get the selected output frame rate."""
+        frame_rate = self._frame_rate_combo.currentData()
+        return self._normalize_frame_rate_value(frame_rate)
+
     def _set_selected_resolution(self, resolution: str) -> None:
         """Set the selected output resolution."""
         normalized = self._normalize_resolution_value(resolution)
         index = self._find_resolution_index(normalized)
         self._resolution_combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _set_selected_audio_mode(self, audio_mode: str) -> None:
+        """Set the selected audio mode."""
+        normalized = self._normalize_audio_mode(audio_mode)
+        index = self._audio_mode_combo.findData(normalized)
+        self._audio_mode_combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _set_selected_frame_rate(self, frame_rate: str) -> None:
+        """Set the selected output frame rate."""
+        normalized = self._normalize_frame_rate_value(frame_rate)
+        index = self._frame_rate_combo.findData(normalized)
+        self._frame_rate_combo.setCurrentIndex(index if index >= 0 else 0)
 
     def _find_resolution_index(self, resolution: str) -> int:
         """Find the first combo index with the given resolution payload."""
@@ -1082,6 +1198,14 @@ class ConvertPage(QWidget):
             return resolution
         return f"{resolution} ({orientation.title()} override)"
 
+    def _resolution_value_for_orientation(
+        self, resolution: str, orientation: str, *, is_override: bool
+    ) -> str:
+        """Build the stored resolution token for a combo entry."""
+        if not is_override:
+            return resolution
+        return f"{orientation}:{resolution}"
+
     def _refresh_resolution_options(self) -> None:
         """Refresh resolution options from the detected file orientation."""
         selected_resolution = self._get_selected_resolution()
@@ -1103,7 +1227,9 @@ class ConvertPage(QWidget):
             )
             self._resolution_combo.setItemData(
                 self._resolution_combo.count() - 1,
-                resolution,
+                self._resolution_value_for_orientation(
+                    resolution, auto_orientation, is_override=False
+                ),
                 RESOLUTION_DATA_ROLE,
             )
 
@@ -1117,7 +1243,9 @@ class ConvertPage(QWidget):
             )
             self._resolution_combo.setItemData(
                 self._resolution_combo.count() - 1,
-                resolution,
+                self._resolution_value_for_orientation(
+                    resolution, override_orientation, is_override=True
+                ),
                 RESOLUTION_DATA_ROLE,
             )
 
@@ -1146,6 +1274,33 @@ class ConvertPage(QWidget):
             return self._file_codecs.get(file_path) == resolved_output_codec
 
         return True
+
+    def _incompatible_audio_copy_paths(
+        self, input_paths: Optional[List[str]] = None
+    ) -> List[str]:
+        """Return queued files whose audio cannot be copied into the selected container."""
+        if self._get_selected_audio_mode() != "copy":
+            return []
+
+        selected_output_codec = self._get_selected_output_codec()
+        if selected_output_codec not in {"h264", "hevc", "vp9"}:
+            return []
+
+        allowed_audio_codecs = (
+            WEBM_COPY_COMPATIBLE_AUDIO_CODECS
+            if selected_output_codec == "vp9"
+            else MP4_COPY_COMPATIBLE_AUDIO_CODECS
+        )
+
+        paths = input_paths if input_paths is not None else self._file_list.get_file_paths()
+        incompatible_paths: List[str] = []
+        for path in paths:
+            metadata = self._file_metadata.get(path)
+            audio_codec = getattr(metadata, "audio_codec", "")
+            normalized_audio_codec = normalize_conversion_codec(audio_codec)
+            if normalized_audio_codec and normalized_audio_codec not in allowed_audio_codecs:
+                incompatible_paths.append(path)
+        return incompatible_paths
 
     def _format_hardware_label(self, encoder: HardwareEncoder) -> str:
         """Get a compact user-facing hardware encoder label."""
@@ -1309,6 +1464,12 @@ class ConvertPage(QWidget):
                 if self._get_selected_resolution() == SAME_AS_SOURCE_RESOLUTION
                 else self._get_selected_resolution()
             ),
+            audio_mode=self._get_selected_audio_mode(),
+            frame_rate=(
+                None
+                if self._get_selected_frame_rate() == SAME_AS_SOURCE_FRAME_RATE
+                else self._get_selected_frame_rate()
+            ),
             crf_value=self._crf_slider.value(),
             preset=self._preset_combo.currentText(),
             use_hardware_accel=use_hw,
@@ -1364,6 +1525,7 @@ class ConvertPage(QWidget):
             and not self._file_list.is_busy()
             and self._preflight_worker is None
             and not self._unsupported_source_output_paths()
+            and not self._incompatible_audio_copy_paths()
             and not self._cancel_btn.isVisible()
         )
         self._start_btn.setEnabled(can_start)
@@ -1399,6 +1561,13 @@ class ConvertPage(QWidget):
             )
             return
 
+        incompatible_audio_paths = self._incompatible_audio_copy_paths()
+        if incompatible_audio_paths:
+            self._preflight_status_label.setText(
+                "Copy audio is unavailable for one or more files in the selected output format."
+            )
+            return
+
         if not self._source_codec_filter_check.isChecked():
             self._preflight_status_label.setText(
                 f"Ready to convert {file_count} file(s)."
@@ -1425,6 +1594,8 @@ class ConvertPage(QWidget):
         self._file_list.set_enabled(enabled)
         self._codec_combo.setEnabled(enabled)
         self._resolution_combo.setEnabled(enabled)
+        self._audio_mode_combo.setEnabled(enabled)
+        self._frame_rate_combo.setEnabled(enabled)
         self._crf_slider.setEnabled(enabled)
         self._preset_combo.setEnabled(enabled)
         if enabled:
