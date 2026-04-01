@@ -11,32 +11,39 @@ def test_preview_starts_dormant_until_backend_init(qapp, qtbot):
         "Preview playback is unavailable because libmpv could not be initialized.\n"
         "You can still load files, split segments, and export enabled ranges."
     )
-    assert widget._decoder_status_label.text() == "Decoder: unavailable"
+    assert widget._decoder_status_label.text() == ""
+    assert not widget._decoder_status_label.isVisible()
 
 
 def test_decoder_status_label_shows_software_decode(qapp, qtbot):
     widget = VideoPreviewWidget()
     qtbot.addWidget(widget)
+    widget.show()
 
     widget._playback._available = True
     widget._playback._client = object()
+    widget._video_path = "/tmp/test.mp4"
     widget._on_decoder_status_changed("no", "lavc", "FFmpeg")
 
     assert widget._decoder_status_label.text() == "Decoder: software (FFmpeg)"
+    assert widget._decoder_status_label.isVisible()
 
 
 def test_decoder_status_label_shows_hardware_decode(qapp, qtbot):
     widget = VideoPreviewWidget()
     qtbot.addWidget(widget)
+    widget.show()
 
     widget._playback._available = True
     widget._playback._client = object()
+    widget._video_path = "/tmp/test.mp4"
     widget._on_decoder_status_changed("videotoolbox", "lavc", "FFmpeg")
 
     assert (
         widget._decoder_status_label.text()
         == "Decoder: hardware (videotoolbox, FFmpeg)"
     )
+    assert widget._decoder_status_label.isVisible()
 
 
 def test_late_position_updates_do_not_rewrite_drag_label(qapp, qtbot):
@@ -52,3 +59,24 @@ def test_late_position_updates_do_not_rewrite_drag_label(qapp, qtbot):
     widget._on_position_changed(12.0)
 
     assert widget._time_label.text() == "00:00:50.000 / 00:01:40.000"
+
+
+def test_jump_buttons_use_configured_scrub_step(qapp, qtbot):
+    widget = VideoPreviewWidget()
+    qtbot.addWidget(widget)
+
+    widget._playback._available = True
+    widget._playback._client = object()
+    widget._playback._duration = 30.0
+    widget._playback._position = 10.0
+    widget.set_scrub_step_seconds(0.5)
+
+    seek_calls = []
+    widget._playback.seek_relative = lambda delta, precise=True: seek_calls.append(
+        (delta, precise)
+    )
+
+    widget.jump_backward()
+    widget.jump_forward()
+
+    assert seek_calls == [(-0.5, True), (0.5, True)]

@@ -145,3 +145,18 @@ def test_scrub_controller_ignores_stale_settle_events(tmp_path, qtbot):
     assert preview_override_changes[-1] is False
 
     ConfigService._instance = None
+
+
+def test_scrub_controller_uses_precise_live_seek_for_small_drags(tmp_path, qtbot):
+    _build_config(tmp_path)
+    playback = _FakePlayback()
+    controller = ScrubController(playback)
+
+    controller.begin_drag()
+    controller.update_drag(0.2)
+    qtbot.waitUntil(lambda: bool(playback.seek_calls), timeout=500)
+
+    assert playback.seek_calls[0][:2] == (0.2, True)
+
+    controller.end_drag()
+    ConfigService._instance = None

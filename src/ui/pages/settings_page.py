@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QUrl
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QKeySequenceEdit,
     QScrollArea,
     QSpinBox,
     QVBoxLayout,
@@ -86,6 +87,7 @@ class SettingsPage(QWidget):
         self._build_rate_limiting_section(main_layout)
         self._build_retry_logic_section(main_layout)
         self._build_advanced_download_section(main_layout)
+        self._build_trim_shortcuts_section(main_layout)
 
         main_layout.addStretch()
         scroll.setWidget(container)
@@ -382,6 +384,38 @@ class SettingsPage(QWidget):
         section.content_layout.addLayout(fragment_form)
         parent_layout.addWidget(section)
 
+    def _build_trim_shortcuts_section(self, parent_layout: QVBoxLayout) -> None:
+        section = CollapsibleSection("Trim & Shortcuts", expanded=False)
+        form = QFormLayout()
+
+        self._trim_scrub_step_combo = QComboBox()
+        for step in (0.1, 0.25, 0.5, 1.0, 2.0, 5.0):
+            label = f"{step:g} s" if step < 1.0 else f"{step:.0f} s"
+            self._trim_scrub_step_combo.addItem(label, step)
+        form.addRow("Default scrub step:", self._trim_scrub_step_combo)
+
+        self._trim_split_shortcut_edit = QKeySequenceEdit()
+        form.addRow("Split at current:", self._trim_split_shortcut_edit)
+
+        self._trim_delete_shortcut_edit = QKeySequenceEdit()
+        form.addRow("Delete selected segment:", self._trim_delete_shortcut_edit)
+
+        self._trim_label_shortcut_edit = QKeySequenceEdit()
+        form.addRow("Label selected segment:", self._trim_label_shortcut_edit)
+
+        self._trim_close_shortcut_edit = QKeySequenceEdit()
+        form.addRow("Close current video:", self._trim_close_shortcut_edit)
+
+        section.content_layout.addLayout(form)
+
+        note = QLabel(
+            "These shortcuts only apply while the Trim page is active."
+        )
+        note.setObjectName("dimLabel")
+        note.setWordWrap(True)
+        section.content_layout.addWidget(note)
+        parent_layout.addWidget(section)
+
     # ------------------------------------------------------------------
     # Signal wiring
     # ------------------------------------------------------------------
@@ -418,6 +452,20 @@ class SettingsPage(QWidget):
         self.fragment_end_spin.valueChanged.connect(self._on_setting_changed)
         self.fragment_step_spin.valueChanged.connect(self._on_setting_changed)
         self.fragment_base_spin.valueChanged.connect(self._on_setting_changed)
+
+        self._trim_scrub_step_combo.currentIndexChanged.connect(
+            self._on_setting_changed
+        )
+        self._trim_split_shortcut_edit.editingFinished.connect(self._on_setting_changed)
+        self._trim_delete_shortcut_edit.editingFinished.connect(
+            self._on_setting_changed
+        )
+        self._trim_label_shortcut_edit.editingFinished.connect(
+            self._on_setting_changed
+        )
+        self._trim_close_shortcut_edit.editingFinished.connect(
+            self._on_setting_changed
+        )
 
     # ------------------------------------------------------------------
     # Load / save
@@ -485,6 +533,32 @@ class SettingsPage(QWidget):
         self.fragment_step_spin.setValue(float(fragment_retry.get("step", 1.0)))
         self.fragment_base_spin.setValue(float(fragment_retry.get("base", 2.0)))
 
+        trim_scrub_step = float(
+            self._config.get("trim.playback.scrub_step_seconds", 0.25)
+        )
+        scrub_index = self._trim_scrub_step_combo.findData(trim_scrub_step)
+        self._trim_scrub_step_combo.setCurrentIndex(max(scrub_index, 0))
+
+        self._trim_split_shortcut_edit.setKeySequence(
+            QKeySequence(self._config.get("trim.shortcuts.split_segment", "S"))
+        )
+        self._trim_delete_shortcut_edit.setKeySequence(
+            QKeySequence(
+                self._config.get("trim.shortcuts.delete_segment", "Backspace")
+            )
+        )
+        self._trim_label_shortcut_edit.setKeySequence(
+            QKeySequence(self._config.get("trim.shortcuts.label_segment", "L"))
+        )
+        self._trim_close_shortcut_edit.setKeySequence(
+            QKeySequence(
+                self._config.get(
+                    "trim.shortcuts.close_video",
+                    QKeySequence(QKeySequence.StandardKey.Close).toString(),
+                )
+            )
+        )
+
         self._loading = False
         self._update_retry_controls()
         self._update_fragment_controls()
@@ -527,6 +601,31 @@ class SettingsPage(QWidget):
         }
 
         self._config.set_section("download_polite", polite, save=True)
+        self._config.set(
+            "trim.playback.scrub_step_seconds",
+            float(self._trim_scrub_step_combo.currentData()),
+            save=False,
+        )
+        self._config.set(
+            "trim.shortcuts.split_segment",
+            self._trim_split_shortcut_edit.keySequence().toString(),
+            save=False,
+        )
+        self._config.set(
+            "trim.shortcuts.delete_segment",
+            self._trim_delete_shortcut_edit.keySequence().toString(),
+            save=False,
+        )
+        self._config.set(
+            "trim.shortcuts.label_segment",
+            self._trim_label_shortcut_edit.keySequence().toString(),
+            save=False,
+        )
+        self._config.set(
+            "trim.shortcuts.close_video",
+            self._trim_close_shortcut_edit.keySequence().toString(),
+            save=True,
+        )
 
     # ------------------------------------------------------------------
     # Slot handlers
