@@ -9,7 +9,7 @@ The application is a Python desktop GUI built around `PyQt6`. Main entry points 
 
 - `src/ui/`: windows, pages, widgets, and theme/QSS code
 - `src/core/`: download, auth, FFmpeg, matching, and worker logic
-- `src/services/`: config, session, saved-task, and crash recovery services
+- `src/services/`: config, session, and crash recovery services
 - `src/data/`: database models and repositories
 - `src/utils/`: shared helpers and platform utilities
 
@@ -27,7 +27,6 @@ The LosslessCut-style editor work lives inside the existing Trim tool rather tha
 - Quick-session autosave writes `data/trim_quick_session.json`. Saved projects are JSON files chosen by the user, typically `*.cutproj.json`.
 - Keyframe awareness currently comes from ffprobe via `src/core/editor/keyframe_probe_worker.py`. If you add copy-safety warnings or boundary logic, build on that data instead of inferring from playback alone.
 - User-editable Trim bindings and the default scrub-step are configured in Settings under the `Trim & Shortcuts` section and persisted via `trim.shortcuts.*` plus `trim.playback.scrub_step_seconds`.
-- `src/main.py` builds shared startup services through `build_startup_services(...)` before creating `MainWindow`. `MainWindow` accepts an optional `saved_task_service` so startup wiring stays backward-compatible while Saved Tasks UI work lands later.
 
 ## Build, Test, and Development Commands
 - `python -m venv .venv && source .venv/bin/activate`: create and activate a local virtualenv
