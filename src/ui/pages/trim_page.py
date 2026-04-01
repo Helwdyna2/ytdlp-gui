@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
 )
 
+from ...core.editor import EditorSession
 from ...core.trim_manager import TrimManager
 from ...core.ffprobe_worker import FFprobeWorker
 from ...data.models import TrimConfig
@@ -29,6 +30,9 @@ from ...services.config_service import ConfigService
 from ...utils.constants import VIDEO_FILE_FILTER
 from ...utils.dialog_utils import get_dialog_start_dir, update_dialog_last_dir
 from ..components.page_header import PageHeader
+from ..widgets.segment_list_widget import SegmentListWidget
+from ..widgets.trim_timeline_widget import TrimTimelineWidget
+from ..widgets.video_preview_widget import VideoPreviewWidget
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +64,12 @@ class TrimPage(QWidget):
     ):
         super().__init__(parent)
         self._trim_manager: Optional[TrimManager] = trim_manager
-        self._video_preview = video_preview
-        self._trim_timeline = trim_timeline
+        self._video_preview = video_preview or VideoPreviewWidget()
+        self._trim_timeline = trim_timeline or TrimTimelineWidget()
         self._config_service = ConfigService()
+        self._editor_session = EditorSession()
+        self._syncing_editor_ui = False
+        self._is_running = False
 
         # Runtime state
         self._current_path: Optional[str] = None
@@ -114,24 +121,38 @@ class TrimPage(QWidget):
         main_layout.addLayout(mode_row)
 
         # 3. Video preview
-        if self._video_preview is not None:
-            self._preview_container = self._video_preview
-        else:
-            placeholder = QWidget()
-            placeholder.setMinimumHeight(200)
-            placeholder.setObjectName("videoPreviewPlaceholder")
-            self._preview_container = placeholder
+        self._preview_container = self._video_preview
         main_layout.addWidget(self._preview_container, stretch=3)
 
         # 4. Timeline
-        if self._trim_timeline is not None:
-            self._timeline_container = self._trim_timeline
-        else:
-            placeholder = QWidget()
-            placeholder.setMinimumHeight(60)
-            placeholder.setObjectName("timelinePlaceholder")
-            self._timeline_container = placeholder
+        self._timeline_container = self._trim_timeline
         main_layout.addWidget(self._timeline_container)
+
+        # 4b. Segment editor controls
+        segment_row = QHBoxLayout()
+        segment_row.setSpacing(8)
+
+        self._split_btn = QPushButton("Split at Current")
+        self._split_btn.setObjectName("btnWire")
+        self._split_btn.setEnabled(False)
+        segment_row.addWidget(self._split_btn)
+
+        self._toggle_segment_btn = QPushButton("Disable Segment")
+        self._toggle_segment_btn.setObjectName("btnWire")
+        self._toggle_segment_btn.setEnabled(False)
+        segment_row.addWidget(self._toggle_segment_btn)
+
+        segment_row.addWidget(QLabel("Label:"))
+        self._segment_label_input = QLineEdit()
+        self._segment_label_input.setPlaceholderText("Optional segment label")
+        self._segment_label_input.setEnabled(False)
+        segment_row.addWidget(self._segment_label_input, stretch=1)
+
+        main_layout.addLayout(segment_row)
+
+        self._segment_list = SegmentListWidget()
+        self._segment_list.setEnabled(False)
+        main_layout.addWidget(self._segment_list)
 
         # 5. Time controls row
         time_row = QHBoxLayout()
@@ -245,6 +266,8 @@ class TrimPage(QWidget):
         # Time control buttons
         self._set_start_btn.clicked.connect(self._on_set_start)
         self._set_end_btn.clicked.connect(self._on_set_end)
+        self._start_input.editingFinished.connect(self._sync_inputs_to_session)
+        self._end_input.editingFinished.connect(self._sync_inputs_to_session)
 
         # Output browse
         self._output_browse_btn.clicked.connect(self._on_browse_output)
@@ -252,6 +275,11 @@ class TrimPage(QWidget):
         # Action buttons
         self._trim_btn.clicked.connect(self._on_trim)
         self._cancel_btn.clicked.connect(self._on_cancel)
+        self._split_btn.clicked.connect(self._on_split_segment)
+        self._toggle_segment_btn.clicked.connect(self._on_toggle_segment)
+        self._segment_label_input.editingFinished.connect(
+            self._on_segment_label_edited
+        )
 
         # Persist settings on change
         self._lossless_checkbox.stateChanged.connect(self._save_settings)
@@ -265,6 +293,11 @@ class TrimPage(QWidget):
         # Wire injected timeline widget
         if self._trim_timeline is not None:
             self._trim_timeline.range_changed.connect(self._on_range_changed)
+            self._trim_timeline.seek_requested.connect(self._on_timeline_seek_requested)
+
+        self._segment_list.segment_selected.connect(self._on_segment_selected)
+        self._segment_list.segment_toggled.connect(self._on_segment_toggled)
+        self._segment_list.segment_label_changed.connect(self._on_segment_label_changed)
 
         # Wire injected TrimManager if provided at construction
         if self._trim_manager is not None:
@@ -308,8 +341,11 @@ class TrimPage(QWidget):
         # Preview + timeline only shown in single mode
         self._preview_container.setVisible(is_single)
         self._timeline_container.setVisible(is_single)
-        self._set_start_btn.setEnabled(is_single)
-        self._set_end_btn.setEnabled(is_single)
+        self._split_btn.setVisible(is_single)
+        self._toggle_segment_btn.setVisible(is_single)
+        self._segment_label_input.setVisible(is_single)
+        self._segment_list.setVisible(is_single)
+        self._apply_editor_control_state()
 
     def _on_load_video(self) -> None:
         """Open a file dialog and load the selected video."""
@@ -324,6 +360,8 @@ class TrimPage(QWidget):
     def _load_video(self, path: str) -> None:
         """Load a video file for preview and trimming."""
         self._current_path = path
+        self._editor_session.clear()
+        self._refresh_editor_ui()
 
         # Reset time inputs and timeline
         self._start_input.setText("0.000")
@@ -368,12 +406,12 @@ class TrimPage(QWidget):
 
     def _on_duration_loaded(self, duration: float) -> None:
         """Handle video duration loaded from preview or ffprobe."""
-        if self._trim_timeline is not None:
-            self._trim_timeline.set_duration(duration)
+        if self._current_path is None:
+            return
 
-        self._start_input.setText("0.000")
-        self._end_input.setText(f"{duration:.3f}")
-        self._trim_btn.setEnabled(self._current_path is not None)
+        self._editor_session.load_source(self._current_path, duration)
+        self._refresh_editor_ui()
+        self._trim_btn.setEnabled(bool(self._editor_session.enabled_segments()))
 
     def _on_position_changed(self, position: float) -> None:
         """Handle playback position change from preview widget."""
@@ -382,37 +420,96 @@ class TrimPage(QWidget):
 
     def _on_range_changed(self, start: float, end: float) -> None:
         """Handle timeline range change — sync into text inputs."""
-        self._start_input.blockSignals(True)
-        self._end_input.blockSignals(True)
-        self._start_input.setText(f"{start:.3f}")
-        self._end_input.setText(f"{end:.3f}")
-        self._start_input.blockSignals(False)
-        self._end_input.blockSignals(False)
+        if self._syncing_editor_ui:
+            return
+
+        if self._editor_session.selected_segment is None:
+            self._update_time_inputs(start, end)
+            return
+
+        self._editor_session.update_selected_range(start, end)
+        self._refresh_editor_ui()
 
     def _on_set_start(self) -> None:
         """Set start input to current playback position."""
         if self._video_preview is not None:
             pos = self._video_preview.get_position()
             self._start_input.setText(f"{pos:.3f}")
-            self._sync_inputs_to_timeline()
+            self._sync_inputs_to_session()
 
     def _on_set_end(self) -> None:
         """Set end input to current playback position."""
         if self._video_preview is not None:
             pos = self._video_preview.get_position()
             self._end_input.setText(f"{pos:.3f}")
-            self._sync_inputs_to_timeline()
+            self._sync_inputs_to_session()
 
-    def _sync_inputs_to_timeline(self) -> None:
-        """Push start/end text input values to the timeline widget."""
-        if self._trim_timeline is None:
+    def _sync_inputs_to_session(self) -> None:
+        """Push start/end text inputs into the selected segment."""
+        if self._editor_session.selected_segment is None:
             return
         try:
             start = float(self._start_input.text())
             end = float(self._end_input.text())
-            self._trim_timeline.set_range(start, end)
         except ValueError:
-            pass
+            self._refresh_editor_ui()
+            return
+
+        self._editor_session.update_selected_range(start, end)
+        self._refresh_editor_ui()
+
+    def _on_split_segment(self) -> None:
+        """Split the active segment at the current playhead position."""
+        if self._video_preview is None:
+            return
+
+        position = self._video_preview.get_position()
+        if self._editor_session.split_at(position) is None:
+            self._status_label.setVisible(True)
+            self._status_label.setText("Move away from the segment edge before splitting.")
+            return
+
+        self._status_label.setVisible(True)
+        self._status_label.setText("Segment split at current position.")
+        self._refresh_editor_ui()
+
+    def _on_toggle_segment(self) -> None:
+        """Toggle the selected segment's enabled state."""
+        segment = self._editor_session.toggle_segment_enabled()
+        if segment is None:
+            return
+        self._refresh_editor_ui()
+
+    def _on_segment_selected(self, segment_id: str) -> None:
+        """Sync list selection into the editor session."""
+        if self._editor_session.select_segment(segment_id) is None:
+            return
+        self._refresh_editor_ui()
+
+    def _on_segment_toggled(self, segment_id: str, enabled: bool) -> None:
+        """Handle enabled-state changes from the segment list."""
+        self._editor_session.set_segment_enabled(segment_id, enabled)
+        self._refresh_editor_ui()
+
+    def _on_segment_label_changed(self, segment_id: str, label: str) -> None:
+        """Handle inline label edits from the segment list."""
+        self._editor_session.set_segment_label(segment_id, label)
+        self._refresh_editor_ui()
+
+    def _on_segment_label_edited(self) -> None:
+        """Handle label edits from the inline inspector field."""
+        segment = self._editor_session.selected_segment
+        if segment is None:
+            return
+        self._editor_session.set_segment_label(
+            segment.id, self._segment_label_input.text()
+        )
+        self._refresh_editor_ui()
+
+    def _on_timeline_seek_requested(self, position: float) -> None:
+        """Seek the preview player when the timeline requests it."""
+        if self._video_preview is not None:
+            self._video_preview.seek(position)
 
     def _on_browse_output(self) -> None:
         """Browse for output directory."""
@@ -432,36 +529,37 @@ class TrimPage(QWidget):
             QMessageBox.warning(self, "No Video", "Please load a video file first.")
             return
 
-        try:
-            start = float(self._start_input.text())
-            end = float(self._end_input.text())
-        except ValueError:
+        enabled_segments = self._editor_session.enabled_segments()
+        if not enabled_segments:
             QMessageBox.warning(
-                self, "Invalid Input", "Start and end times must be valid numbers."
-            )
-            return
-
-        if end <= start:
-            QMessageBox.warning(
-                self, "Invalid Range", "End time must be greater than start time."
+                self,
+                "No Segments Selected",
+                "Enable at least one segment before exporting.",
             )
             return
 
         lossless = self._lossless_checkbox.isChecked()
         output_dir = self._output_input.text() or None
+        duration = self._editor_session.duration or (
+            self._trim_timeline.get_duration() if self._trim_timeline is not None else 0.0
+        )
 
-        # Determine duration from timeline or fall back to end time
-        duration = end
-        if self._trim_timeline is not None:
-            d = self._trim_timeline.get_duration()
-            if d > 0:
-                duration = d
+        trim_ranges = [
+            (segment.start_time, segment.end_time, duration)
+            for segment in enabled_segments
+        ]
+        output_path_overrides = self._build_output_paths(
+            self._current_path,
+            output_dir,
+            len(trim_ranges),
+        )
 
         self._start_trim(
-            files=[self._current_path],
-            trim_ranges=[(start, end, duration)],
+            files=[self._current_path] * len(trim_ranges),
+            trim_ranges=trim_ranges,
             lossless=lossless,
             output_dir=output_dir,
+            output_path_overrides=output_path_overrides,
         )
 
     def _start_trim(
@@ -470,6 +568,7 @@ class TrimPage(QWidget):
         trim_ranges: List[tuple],
         lossless: bool,
         output_dir: Optional[str],
+        output_path_overrides: Optional[List[str]] = None,
     ) -> None:
         """Create a TrimManager, add jobs, and start processing."""
         # Reset delete-originals tracking
@@ -489,8 +588,17 @@ class TrimPage(QWidget):
         self._connect_trim_manager(self._trim_manager)
 
         # Add jobs
-        for path, (start, end, dur) in zip(files, trim_ranges):
-            job = self._trim_manager.add_job(path, start, end, dur)
+        overrides = output_path_overrides or [None] * len(trim_ranges)
+        for path, (start, end, dur), output_path_override in zip(
+            files, trim_ranges, overrides
+        ):
+            job = self._trim_manager.add_job(
+                path,
+                start,
+                end,
+                dur,
+                output_path_override=output_path_override,
+            )
             if job and job.id is not None:
                 self._job_id_to_input_path[job.id] = path
 
@@ -578,6 +686,7 @@ class TrimPage(QWidget):
 
     def _set_running(self, running: bool) -> None:
         """Toggle UI between idle and running states."""
+        self._is_running = running
         self._trim_btn.setEnabled(not running)
         self._load_video_btn.setEnabled(not running)
         self._cancel_btn.setVisible(running)
@@ -590,6 +699,8 @@ class TrimPage(QWidget):
             self._mode_combo.setEnabled(False)
         else:
             self._mode_combo.setEnabled(True)
+
+        self._apply_editor_control_state()
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -610,3 +721,77 @@ class TrimPage(QWidget):
         if self._ffprobe_worker is not None:
             self._ffprobe_worker.deleteLater()
             self._ffprobe_worker = None
+
+    def _refresh_editor_ui(self) -> None:
+        """Re-sync editor controls from the in-memory session."""
+        self._syncing_editor_ui = True
+        segment = self._editor_session.selected_segment
+
+        if self._trim_timeline is not None:
+            if self._editor_session.duration > 0:
+                self._trim_timeline.set_duration(self._editor_session.duration)
+            if segment is not None:
+                self._trim_timeline.set_range(segment.start_time, segment.end_time)
+            else:
+                self._trim_timeline.reset()
+
+        if segment is not None:
+            self._update_time_inputs(segment.start_time, segment.end_time)
+            self._segment_label_input.setText(segment.label)
+            self._toggle_segment_btn.setText(
+                "Disable Segment" if segment.enabled else "Enable Segment"
+            )
+        else:
+            self._update_time_inputs(0.0, 0.0)
+            self._segment_label_input.clear()
+            self._toggle_segment_btn.setText("Disable Segment")
+
+        self._segment_list.set_session(
+            self._editor_session if self._editor_session.segments else None
+        )
+        self._syncing_editor_ui = False
+        self._apply_editor_control_state()
+
+    def _update_time_inputs(self, start: float, end: float) -> None:
+        """Update start/end text fields without re-triggering sync."""
+        self._start_input.blockSignals(True)
+        self._end_input.blockSignals(True)
+        self._start_input.setText(f"{start:.3f}")
+        self._end_input.setText(f"{end:.3f}")
+        self._start_input.blockSignals(False)
+        self._end_input.blockSignals(False)
+
+    def _build_output_paths(
+        self, input_path: str, output_dir: Optional[str], count: int
+    ) -> List[str]:
+        """Build separate output paths for enabled segments."""
+        input_file = Path(input_path)
+        base_dir = Path(output_dir) if output_dir else input_file.parent
+
+        if count == 1:
+            return [str(base_dir / f"{input_file.stem}_trimmed{input_file.suffix}")]
+
+        return [
+            str(base_dir / f"{input_file.stem}_trimmed_{index + 1:03d}{input_file.suffix}")
+            for index in range(count)
+        ]
+
+    def _apply_editor_control_state(self) -> None:
+        """Update editor controls from selection and running state."""
+        is_single_mode = self._mode_combo.currentIndex() == self._MODE_SINGLE
+        has_selection = self._editor_session.selected_segment is not None
+        has_segments = bool(self._editor_session.segments)
+        has_enabled = bool(self._editor_session.enabled_segments())
+        is_interactive = not self._is_running and is_single_mode
+
+        self._split_btn.setEnabled(is_interactive and has_selection)
+        self._toggle_segment_btn.setEnabled(is_interactive and has_selection)
+        self._segment_label_input.setEnabled(is_interactive and has_selection)
+        self._segment_list.setEnabled(is_interactive and has_segments)
+        self._start_input.setEnabled(is_interactive and has_selection)
+        self._end_input.setEnabled(is_interactive and has_selection)
+        self._set_start_btn.setEnabled(is_interactive and has_selection)
+        self._set_end_btn.setEnabled(is_interactive and has_selection)
+        self._trim_btn.setEnabled(
+            is_interactive and bool(self._current_path) and has_enabled
+        )

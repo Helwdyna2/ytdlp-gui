@@ -62,6 +62,7 @@ class TrimManager(QObject):
         original_duration: float,
         output_dir: Optional[str] = None,
         lossless: Optional[bool] = None,
+        output_path_override: Optional[str] = None,
     ) -> TrimJob:
         """
         Add a trim job to the queue.
@@ -86,7 +87,9 @@ class TrimManager(QObject):
             suffix = self._config.suffix if self._config else "_trimmed"
             out_dir = output_dir or (self._config.output_dir if self._config else None)
 
-            if out_dir:
+            if output_path_override:
+                output_path = Path(output_path_override)
+            elif out_dir:
                 output_path = (
                     Path(out_dir) / f"{input_file.stem}{suffix}{input_file.suffix}"
                 )
