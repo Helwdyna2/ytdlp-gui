@@ -96,11 +96,14 @@ class ConversionRepository:
 
     def update_ffmpeg_command(self, job_id: int, ffmpeg_command: str) -> None:
         """Persist the built FFmpeg command for a job after it has been constructed."""
-        self._db.execute(
+        cursor = self._db.execute(
             "UPDATE conversion_jobs SET ffmpeg_command = ? WHERE id = ?",
             (ffmpeg_command, job_id),
         )
-        logger.debug(f"Saved ffmpeg_command for job {job_id}")
+        if cursor.rowcount > 0:
+            logger.debug(f"Saved ffmpeg_command for job {job_id}")
+        else:
+            logger.warning(f"update_ffmpeg_command: no job found with id={job_id}")
 
     def get_by_id(self, job_id: int) -> Optional[ConversionJob]:
         """

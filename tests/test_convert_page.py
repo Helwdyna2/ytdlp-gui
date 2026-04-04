@@ -2,6 +2,7 @@
 
 import os
 import sys
+from typing import Iterable, List, Mapping, Optional
 
 import pytest
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -162,14 +163,18 @@ def fake_conversion_manager(monkeypatch, convert_page_module):
             self.config = config
 
         def add_files_async(
-            self, files, output_dir, output_paths=None, source_codecs=None
-        ):
-            self.added_files = list(files)
+            self,
+            input_paths: Iterable[str],
+            output_dir: Optional[str],
+            output_paths: Optional[Mapping[str, str]] = None,
+            source_codecs: Optional[Mapping[str, str]] = None,
+        ) -> None:
+            self.added_files = list(input_paths)
             self.added_output_dir = output_dir
             self.added_output_paths = output_paths
             self.added_source_codecs = source_codecs
 
-        def reset_counts(self):
+        def reset_counts(self) -> None:
             self.completed_count = 0
             self.failed_count = 0
 
