@@ -44,6 +44,16 @@ def _normalize_status(raw_status: Any) -> ConvertQueueItemStatus:
         return ConvertQueueItemStatus.PENDING
 
 
+def _normalize_progress_percent(raw_progress_percent: Any) -> float:
+    """Map missing or malformed persisted progress values onto a safe default."""
+    try:
+        if raw_progress_percent is None:
+            return 0.0
+        return float(raw_progress_percent)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 @dataclass(slots=True)
 class ConvertQueueItem:
     """Serializable Convert queue entry."""
@@ -86,7 +96,7 @@ class ConvertQueueItem:
                 else None
             ),
             status=_normalize_status(payload.get("status")),
-            progress_percent=float(payload.get("progress_percent", 0.0)),
+            progress_percent=_normalize_progress_percent(payload.get("progress_percent")),
             detail=str(payload.get("detail", "")),
             error_message=str(payload.get("error_message", "")),
         )

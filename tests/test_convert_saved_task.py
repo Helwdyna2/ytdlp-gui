@@ -75,6 +75,20 @@ def test_load_convert_task_payload_normalizes_legacy_and_invalid_status_values()
     ]
 
 
+def test_load_convert_task_payload_normalizes_invalid_progress_percent_values():
+    payload = {
+        "items": [
+            {"item_id": "null-progress", "input_path": "/tmp/a.mp4", "output_path": "/tmp/out/a.mp4", "progress_percent": None},
+            {"item_id": "bad-progress", "input_path": "/tmp/b.mp4", "output_path": "/tmp/out/b.mp4", "progress_percent": "not-a-number"},
+            {"item_id": "good-progress", "input_path": "/tmp/c.mp4", "output_path": "/tmp/out/c.mp4", "progress_percent": "42.5"},
+        ]
+    }
+
+    restored = load_convert_task_payload(payload)
+
+    assert [item.progress_percent for item in restored] == [0.0, 0.0, 42.5]
+
+
 def test_detect_existing_outputs_leaves_missing_and_zero_byte_outputs_unfinished(tmp_path):
     zero_byte_path = tmp_path / "zero.mp4"
     zero_byte_path.write_bytes(b"")
