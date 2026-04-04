@@ -19,6 +19,31 @@ class ConvertQueueItemStatus(str, Enum):
     INCOMPLETE = "incomplete"
 
 
+def _normalize_status(raw_status: Any) -> ConvertQueueItemStatus:
+    """Map legacy or invalid persisted statuses onto the current queue states."""
+    if isinstance(raw_status, ConvertQueueItemStatus):
+        return raw_status
+    if raw_status is None:
+        return ConvertQueueItemStatus.PENDING
+
+    value = str(raw_status).strip().lower()
+    if not value:
+        return ConvertQueueItemStatus.PENDING
+
+    legacy_map = {
+        "in_progress": ConvertQueueItemStatus.PROCESSING,
+        "cancelled": ConvertQueueItemStatus.INCOMPLETE,
+        "canceled": ConvertQueueItemStatus.INCOMPLETE,
+    }
+    if value in legacy_map:
+        return legacy_map[value]
+
+    try:
+        return ConvertQueueItemStatus(value)
+    except ValueError:
+        return ConvertQueueItemStatus.PENDING
+
+
 @dataclass(slots=True)
 class ConvertQueueItem:
     """Serializable Convert queue entry."""
@@ -50,12 +75,6 @@ class ConvertQueueItem:
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "ConvertQueueItem":
         """Restore a queue item from persisted task data."""
-        raw_status = payload.get("status", ConvertQueueItemStatus.PENDING)
-        if isinstance(raw_status, ConvertQueueItemStatus):
-            status = raw_status
-        else:
-            status = ConvertQueueItemStatus(str(raw_status))
-
         return cls(
             item_id=str(payload.get("item_id", "")),
             input_path=str(payload.get("input_path", "")),
@@ -66,7 +85,7 @@ class ConvertQueueItem:
                 if payload.get("source_root") is not None
                 else None
             ),
-            status=status,
+            status=_normalize_status(payload.get("status")),
             progress_percent=float(payload.get("progress_percent", 0.0)),
             detail=str(payload.get("detail", "")),
             error_message=str(payload.get("error_message", "")),
@@ -97,6 +116,10 @@ def detect_existing_outputs(items: list[ConvertQueueItem]) -> list[ConvertQueueI
     """Mark queue items complete when their expected output already exists."""
     updated: list[ConvertQueueItem] = []
     for item in items:
+        if item.status is not ConvertQueueItemStatus.PENDING:
+            updated.append(item)
+            continue
+
         output_file = Path(item.output_path)
         if output_file.exists() and output_file.is_file() and output_file.stat().st_size > 0:
             updated.append(
