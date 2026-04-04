@@ -884,3 +884,121 @@ def test_convert_page_cancel_marks_unstarted_rows_incomplete(
 
     assert page._queue_widget.status_text_for("/tmp/a.mp4") == "Cancelled by user"
     assert page._queue_widget.status_text_for("/tmp/b.mp4") == "Cancelled before start"
+
+
+def test_convert_page_pause_marks_active_and_pending_rows_incomplete(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_conversion_manager,
+    convert_page_module,
+):
+    from src.data.models import ConversionJob
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/a.mp4", "/tmp/b.mp4"])
+    qapp.processEvents()
+
+    page._on_start()
+    page._on_jobs_created(
+        [
+            ConversionJob(id=1, input_path="/tmp/a.mp4", output_path="/tmp/a_out.mp4"),
+            ConversionJob(id=2, input_path="/tmp/b.mp4", output_path="/tmp/b_out.mp4"),
+        ]
+    )
+    page._on_job_started(1)
+    page._on_job_progress(1, 47.0, "1x", "00:03")
+
+    snapshot = page.pause_for_saved_task()
+
+    manager = fake_conversion_manager.instances[-1]
+    assert manager.cancelled is True
+    assert snapshot["config"]["output_codec"] == "h264"
+    assert [item["status"] for item in snapshot["items"]] == [
+        "incomplete",
+        "incomplete",
+    ]
+    assert snapshot["items"][0]["progress_percent"] == 0.0
+    assert snapshot["items"][0]["detail"] == "Restart from beginning"
+    assert snapshot["items"][1]["detail"] == "Paused before start"
+    assert page._queue_widget.status_text_for("/tmp/a.mp4") == "Restart from beginning"
+    assert page._queue_widget.status_text_for("/tmp/b.mp4") == "Paused before start"
+
+
+def test_convert_page_restore_resumes_only_unfinished_items_in_queue_order(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_conversion_manager,
+    convert_page_module,
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+
+    page = ConvertPage()
+    page.restore_saved_task(
+        payload={
+            "items": [
+                {
+                    "item_id": "done",
+                    "input_path": "/tmp/done.mp4",
+                    "output_path": "/tmp/out/done.mp4",
+                    "display_name": "done.mp4",
+                    "status": "completed",
+                    "progress_percent": 100.0,
+                    "detail": "Complete",
+                },
+                {
+                    "item_id": "retry",
+                    "input_path": "/tmp/retry.mp4",
+                    "output_path": "/tmp/out/retry.mp4",
+                    "display_name": "retry.mp4",
+                    "status": "incomplete",
+                    "progress_percent": 62.0,
+                    "detail": "Cancelled",
+                },
+                {
+                    "item_id": "pending",
+                    "input_path": "/tmp/pending.mp4",
+                    "output_path": "/tmp/out/pending.mp4",
+                    "display_name": "pending.mp4",
+                    "status": "pending",
+                    "progress_percent": 0.0,
+                    "detail": "Pending",
+                },
+            ]
+        },
+        config_payload={
+            "output_codec": "h264",
+            "output_dir": "/tmp/out",
+            "crf_value": 23,
+            "preset": "medium",
+            "use_hardware_accel": False,
+            "hardware_encoder": None,
+        },
+    )
+    qapp.processEvents()
+
+    assert [item.input_path for item in page._queue_items] == [
+        "/tmp/done.mp4",
+        "/tmp/retry.mp4",
+        "/tmp/pending.mp4",
+    ]
+    assert page._queue_widget.status_text_for("/tmp/done.mp4") == "Complete"
+    assert page._queue_widget.status_text_for("/tmp/retry.mp4") == "Restart from beginning"
+    assert page._queue_widget.status_text_for("/tmp/pending.mp4") == "Pending"
+
+    page._on_start()
+
+    manager = fake_conversion_manager.instances[-1]
+    assert manager.added_files == ["/tmp/retry.mp4", "/tmp/pending.mp4"]
+    assert manager.added_output_paths == {
+        "/tmp/retry.mp4": "/tmp/out/retry.mp4",
+        "/tmp/pending.mp4": "/tmp/out/pending.mp4",
+    }
