@@ -9,10 +9,11 @@ import pytest
 pytest.importorskip("PyQt6.QtWidgets")
 
 from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import QApplication, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from src.data.database import Database
-from src.data.models import OutputConfig
+from src.data.models import OutputConfig, SavedTask, SavedTaskStatus
 
 
 @pytest.fixture(autouse=True)
@@ -245,6 +246,27 @@ class DummyPage(QWidget):
         super().__init__(parent)
 
 
+class DummyConvertPage(DummyPage):
+    def __init__(self, parent=None, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.restore_calls = []
+
+    def restore_saved_task(
+        self,
+        payload,
+        config_payload=None,
+        *,
+        saved_task_id=None,
+    ):
+        self.restore_calls.append(
+            {
+                "payload": payload,
+                "config_payload": config_payload,
+                "saved_task_id": saved_task_id,
+            }
+        )
+
+
 class DummyTrimPage(DummyPage):
     def cleanup(self):
         return None
@@ -270,7 +292,7 @@ def _patch_lightweight_main_window_components(monkeypatch):
     monkeypatch.setattr(main_window_module, "AuthStatusWidget", DummyAuthStatusWidget)
     monkeypatch.setattr(main_window_module, "AddUrlsPage", DummyAddUrlsPage)
     monkeypatch.setattr(main_window_module, "ExtractUrlsPage", DummyPage)
-    monkeypatch.setattr(main_window_module, "ConvertPage", DummyPage)
+    monkeypatch.setattr(main_window_module, "ConvertPage", DummyConvertPage)
     monkeypatch.setattr(main_window_module, "TrimPage", DummyTrimPage)
     monkeypatch.setattr(main_window_module, "MetadataPage", DummyPage)
     monkeypatch.setattr(main_window_module, "SortPage", DummyPage)
@@ -337,6 +359,109 @@ def test_main_window_accepts_legacy_positional_parent(qapp, monkeypatch):
     assert win.saved_task_service is None
     assert win.shell.active_tool() == "add_urls"
     assert "trim" in win.shell._tool_widgets
+
+    win.close()
+    qapp.processEvents()
+
+
+def test_file_menu_exposes_saved_tasks_action(qapp, monkeypatch):
+    win = _make_window(monkeypatch, saved_task_service=MagicMock())
+
+    file_menu = win.menuBar().actions()[0].menu()
+    action_texts = [
+        action.text()
+        for action in file_menu.actions()
+        if isinstance(action, QAction) and not action.isSeparator()
+    ]
+
+    assert "Saved Tasks..." in action_texts
+
+    win.close()
+    qapp.processEvents()
+
+
+def test_restore_saved_convert_task_routes_to_convert_page(qapp, monkeypatch):
+    win = _make_window(monkeypatch, saved_task_service=MagicMock())
+    task = SavedTask(
+        id=42,
+        task_type="convert",
+        title="Resume convert",
+        status=SavedTaskStatus.PAUSED,
+        payload={
+            "config": {"audio_codec": "copy"},
+            "items": [{"input_path": "/tmp/example.mp4"}],
+        },
+        summary={"title": "Resume convert"},
+    )
+
+    win.restore_saved_task(task)
+
+    assert win.shell.active_tool() == "convert"
+    assert win.convert_page.restore_calls == [
+        {
+            "payload": task.payload,
+            "config_payload": {"audio_codec": "copy"},
+            "saved_task_id": 42,
+        }
+    ]
+
+    win.close()
+    qapp.processEvents()
+
+
+def test_saved_tasks_menu_action_opens_dialog_and_restores_selection(qapp, monkeypatch):
+    from src.ui import main_window as main_window_module
+
+    selected_task = SavedTask(
+        id=7,
+        task_type="convert",
+        title="Queued convert",
+        status=SavedTaskStatus.ACTIVE,
+        payload={
+            "config": {"video_codec": "h264"},
+            "items": [{"input_path": "/tmp/input.mov"}],
+        },
+        summary={"title": "Queued convert"},
+    )
+
+    class DummySavedTasksDialog:
+        instances = []
+
+        def __init__(self, saved_task_service, parent=None):
+            self.saved_task_service = saved_task_service
+            self.parent = parent
+            DummySavedTasksDialog.instances.append(self)
+
+        def exec(self):
+            return 1
+
+        def selected_action(self):
+            return "restore"
+
+        def selected_task(self):
+            return selected_task
+
+    saved_task_service = MagicMock()
+    monkeypatch.setattr(main_window_module, "SavedTasksDialog", DummySavedTasksDialog)
+    win = _make_window(monkeypatch, saved_task_service=saved_task_service)
+
+    file_menu = win.menuBar().actions()[0].menu()
+    saved_tasks_action = next(
+        action for action in file_menu.actions() if action.text() == "Saved Tasks..."
+    )
+
+    saved_tasks_action.trigger()
+
+    assert DummySavedTasksDialog.instances
+    assert DummySavedTasksDialog.instances[0].saved_task_service is saved_task_service
+    assert win.shell.active_tool() == "convert"
+    assert win.convert_page.restore_calls == [
+        {
+            "payload": selected_task.payload,
+            "config_payload": {"video_codec": "h264"},
+            "saved_task_id": 7,
+        }
+    ]
 
     win.close()
     qapp.processEvents()

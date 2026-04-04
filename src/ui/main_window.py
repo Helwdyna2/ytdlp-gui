@@ -28,6 +28,7 @@ from .widgets.progress_widget import ProgressWidget
 from .widgets.queue_progress_widget import QueueProgressWidget
 from .widgets.download_log_widget import DownloadLogWidget
 from .widgets.auth_status_widget import AuthStatusWidget
+from .widgets.saved_tasks_dialog import SavedTasksDialog
 from .pages.add_urls_page import AddUrlsPage
 from .pages.extract_urls_page import ExtractUrlsPage
 from .pages.convert_page import ConvertPage
@@ -53,7 +54,7 @@ from ..services.config_service import ConfigService
 from ..services.session_service import SessionService
 from ..services.saved_task_service import SavedTaskService
 from ..data.database import Database
-from ..data.models import OutputConfig, Session
+from ..data.models import OutputConfig, SavedTask, Session
 from ..data.repositories.download_repository import DownloadRepository
 from ..utils.constants import (
     APP_NAME,
@@ -244,6 +245,13 @@ class MainWindow(QMainWindow):
 
         # File menu
         file_menu = menu_bar.addMenu("File")
+
+        self.saved_tasks_action = QAction("Saved Tasks...", self)
+        self.saved_tasks_action.setEnabled(self.saved_task_service is not None)
+        self.saved_tasks_action.triggered.connect(self._show_saved_tasks_dialog)
+        file_menu.addAction(self.saved_tasks_action)
+
+        file_menu.addSeparator()
 
         clear_history_action = QAction("Clear Download History", self)
         clear_history_action.triggered.connect(self._clear_history)
@@ -758,6 +766,7 @@ class MainWindow(QMainWindow):
                 "video_only": session.video_only,
             }
         )
+
         self.settings_page.reload_settings()
 
         # Recreate session in SessionService for tracking
@@ -775,6 +784,77 @@ class MainWindow(QMainWindow):
         self.download_log_widget.add_info(
             f"Restored session with {len(session.pending_urls)} pending URLs"
         )
+
+    def restore_saved_task(self, saved_task: SavedTask | dict) -> None:
+        """Restore a saved task into the appropriate tool."""
+        if isinstance(saved_task, SavedTask):
+            task_type = saved_task.task_type
+            payload = saved_task.payload
+            config_payload = payload.get("config")
+            saved_task_id = saved_task.id
+        else:
+            payload = saved_task
+            task_type = payload.get("tool") or payload.get("task_type")
+            config_payload = payload.get("config")
+            saved_task_id = payload.get("saved_task_id")
+
+        if task_type == "convert":
+            self.shell.switch_to_tool("convert")
+            try:
+                self.convert_page.restore_saved_task(
+                    payload,
+                    config_payload,
+                    saved_task_id=saved_task_id,
+                )
+            except TypeError:
+                self.convert_page.restore_saved_task(payload, config_payload)
+            return
+
+        if task_type and task_type in self.shell._tool_widgets:
+            self.shell.switch_to_tool(task_type)
+            return
+
+        QMessageBox.information(
+            self,
+            "Saved Task Unsupported",
+            "This saved task type cannot be restored yet.",
+        )
+
+    def prompt_restore_latest_saved_task(self) -> None:
+        """Offer to restore the newest unfinished saved task."""
+        if self.saved_task_service is None:
+            return
+
+        latest_task = self.saved_task_service.get_latest_recoverable_task()
+        if latest_task is None:
+            return
+
+        result = QMessageBox.question(
+            self,
+            "Restore Saved Task",
+            f'Found unfinished task "{latest_task.title}". Restore it now?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            self.restore_saved_task(latest_task)
+
+    def _show_saved_tasks_dialog(self) -> None:
+        """Open the manual saved tasks browser."""
+        if self.saved_task_service is None:
+            QMessageBox.information(
+                self,
+                "Saved Tasks Unavailable",
+                "Saved task storage is not available in this session.",
+            )
+            return
+
+        dialog = SavedTasksDialog(self.saved_task_service, self)
+        if not dialog.exec():
+            return
+
+        selected_task = dialog.selected_task()
+        if selected_task is not None:
+            self.restore_saved_task(selected_task)
 
     def closeEvent(self, event: QCloseEvent):
         """Handle window close event."""

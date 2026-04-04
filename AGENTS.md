@@ -28,6 +28,11 @@ The LosslessCut-style editor work lives inside the existing Trim tool rather tha
 - Keyframe awareness currently comes from ffprobe via `src/core/editor/keyframe_probe_worker.py`. If you add copy-safety warnings or boundary logic, build on that data instead of inferring from playback alone.
 - User-editable Trim bindings and the default scrub-step are configured in Settings under the `Trim & Shortcuts` section and persisted via `trim.shortcuts.*` plus `trim.playback.scrub_step_seconds`.
 
+## Saved Tasks Notes
+
+- The manual unfinished-task browser lives in `src/ui/widgets/saved_tasks_dialog.py`, and the File menu entry is owned by `src/ui/main_window.py`.
+- Only Convert currently supports full saved-task restoration. Route saved Convert payloads through `MainWindow.restore_saved_task(...)` into `ConvertPage.restore_saved_task(...)`; other task types should stay on the generic shell-open path until their adapters exist.
+
 ## Build, Test, and Development Commands
 - `python -m venv .venv && source .venv/bin/activate`: create and activate a local virtualenv
 - `pip install -r requirements-dev.txt`: install runtime and dev dependencies

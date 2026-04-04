@@ -20,3 +20,6 @@
 - Wrote the Saved Tasks design spec in `docs/superpowers/specs/2026-04-01-saved-tasks-design.md` covering unified task persistence, Convert-first queue recovery, immediate pause behavior, and phased adapter rollout for other tools.
 - Chose a shared Saved Tasks shell with per-tool adapters rather than a universal runtime engine, so Convert can ship first without rewriting Trim and Download internals.
 - Wrote the implementation plan in `docs/superpowers/plans/2026-04-01-saved-tasks-convert-v1.md`, scoping the first delivery to shared Saved Tasks infrastructure plus Convert pause/resume, queue editing, startup restore, and processed-file detection.
+- Added a manual Saved Tasks dialog in `src/ui/widgets/saved_tasks_dialog.py` with restore, open-tool, and delete actions for unfinished tasks.
+- Wired a `Saved Tasks...` File-menu action in `MainWindow` and added a restore entry point that routes saved Convert payloads into `ConvertPage.restore_saved_task(...)` while leaving other tools on the generic shell-open path only.
+- Added focused workbench coverage for the File-menu action, direct saved Convert restore routing, and dialog-triggered restore flow.
