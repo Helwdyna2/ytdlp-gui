@@ -377,6 +377,8 @@ class ConvertPage(QWidget):
         self._preflight_request_id = 0
         self._queue_items: List[ConvertQueueItem] = []
         self._job_id_to_queue_item_id: Dict[int, str] = {}
+        self._active_queue_item_id: Optional[str] = None
+        self._cancel_requested_during_run = False
         self._config_service = ConfigService()
         self._hardware_encoders: List[HardwareEncoder] = []
         self._file_codecs: Dict[str, str] = {}
@@ -775,6 +777,18 @@ class ConvertPage(QWidget):
         elif not files_to_convert:
             return
 
+        if not files_to_convert:
+            QMessageBox.information(
+                self,
+                "Nothing To Convert",
+                "All queued files are currently skipped. Unskip at least one file to start.",
+            )
+            self._update_start_button_state()
+            return
+
+        self._cancel_requested_during_run = False
+        self._active_queue_item_id = None
+
         config = self._build_config()
 
         # Create manager
@@ -815,6 +829,7 @@ class ConvertPage(QWidget):
 
     def _on_cancel(self) -> None:
         """Cancel all conversions."""
+        self._cancel_requested_during_run = True
         if self._conversion_manager:
             self._conversion_manager.cancel_all()
         self.cancel_requested.emit()
@@ -850,6 +865,7 @@ class ConvertPage(QWidget):
         queue_item_id = self._job_id_to_queue_item_id.get(job_id)
         if queue_item_id is None:
             return
+        self._active_queue_item_id = queue_item_id
         self._update_queue_item(
             queue_item_id,
             status=ConvertQueueItemStatus.PROCESSING,
@@ -882,6 +898,8 @@ class ConvertPage(QWidget):
             return
 
         if success:
+            if self._active_queue_item_id == queue_item_id:
+                self._active_queue_item_id = None
             self._update_queue_item(
                 queue_item_id,
                 status=ConvertQueueItemStatus.COMPLETED,
@@ -893,6 +911,8 @@ class ConvertPage(QWidget):
 
         error_text = error or "Failed"
         was_cancelled = "cancelled" in error_text.lower() or "canceled" in error_text.lower()
+        if self._active_queue_item_id == queue_item_id:
+            self._active_queue_item_id = None
         self._update_queue_item(
             queue_item_id,
             status=(
@@ -911,6 +931,9 @@ class ConvertPage(QWidget):
 
     def _on_all_completed(self) -> None:
         """Reset UI after all conversions finish."""
+        if self._cancel_requested_during_run:
+            self._mark_unstarted_queue_items_incomplete()
+
         self._file_list.set_enabled(True)
         self._queue_widget.set_actions_enabled(True)
         self._cancel_btn.setVisible(False)
@@ -938,6 +961,8 @@ class ConvertPage(QWidget):
             self._conversion_manager.reset_counts()
 
         self._job_id_to_queue_item_id = {}
+        self._active_queue_item_id = None
+        self._cancel_requested_during_run = False
         self._update_start_button_state()
 
     def _on_files_deleted(self, count: int, paths: List[str]) -> None:
@@ -1399,6 +1424,38 @@ class ConvertPage(QWidget):
         self._queue_widget.set_queue_items(self._queue_items)
         self._queue_widget.setVisible(bool(self._queue_items))
 
+    def _has_startable_queue_items(self) -> bool:
+        """Return whether the queue has at least one non-skipped item."""
+        return any(
+            item.status is not ConvertQueueItemStatus.SKIPPED
+            for item in self._queue_items
+        )
+
+    def _mark_unstarted_queue_items_incomplete(self) -> None:
+        """Mark queued-but-never-started items as incomplete after cancellation."""
+        updated_items: List[ConvertQueueItem] = []
+        changed = False
+        for item in self._queue_items:
+            if item.status is ConvertQueueItemStatus.PENDING:
+                updated_items.append(
+                    self._replace_queue_item(
+                        item,
+                        status=ConvertQueueItemStatus.INCOMPLETE,
+                        progress_percent=0.0,
+                        detail="Cancelled before start",
+                        error_message="",
+                    )
+                )
+                changed = True
+                continue
+            updated_items.append(item)
+
+        if not changed:
+            return
+
+        self._queue_items = updated_items
+        self._refresh_queue_widget()
+
     def _find_queue_item_by_path(self, input_path: str) -> Optional[ConvertQueueItem]:
         """Find a queue item by source path."""
         for item in self._queue_items:
@@ -1437,14 +1494,34 @@ class ConvertPage(QWidget):
         self._refresh_queue_widget()
 
     def _on_queue_skip_requested(self, item_id: str) -> None:
-        """Mark a queue item as skipped."""
-        self._update_queue_item(
-            item_id,
-            status=ConvertQueueItemStatus.SKIPPED,
-            progress_percent=0.0,
-            detail="Skipped",
-            error_message="",
-        )
+        """Toggle whether a queue item is skipped."""
+        index = self._find_queue_index(item_id)
+        if index < 0:
+            return
+
+        item = self._queue_items[index]
+        if item.status is ConvertQueueItemStatus.PROCESSING:
+            return
+
+        if item.status is ConvertQueueItemStatus.SKIPPED:
+            self._queue_items[index] = self._replace_queue_item(
+                item,
+                status=ConvertQueueItemStatus.PENDING,
+                progress_percent=0.0,
+                detail="Pending",
+                error_message="",
+            )
+        else:
+            self._queue_items[index] = self._replace_queue_item(
+                item,
+                status=ConvertQueueItemStatus.SKIPPED,
+                progress_percent=0.0,
+                detail="Skipped",
+                error_message="",
+            )
+
+        self._refresh_queue_widget()
+        self._update_start_button_state()
 
     def _on_queue_prioritize_requested(self, item_id: str) -> None:
         """Move the selected queue item to the front."""
@@ -1482,6 +1559,7 @@ class ConvertPage(QWidget):
         """Enable the start button only when the queue is fully prepared."""
         can_start = (
             self._file_list.count() > 0
+            and self._has_startable_queue_items()
             and not self._file_list.is_busy()
             and self._preflight_worker is None
             and not self._cancel_btn.isVisible()
@@ -1509,6 +1587,12 @@ class ConvertPage(QWidget):
         if self._preflight_worker is not None:
             self._preflight_status_label.setText(
                 f"Analyzing {file_count} file(s) with ffprobe..."
+            )
+            return
+
+        if not self._has_startable_queue_items():
+            self._preflight_status_label.setText(
+                "All queued files are skipped. Unskip at least one file to start."
             )
             return
 

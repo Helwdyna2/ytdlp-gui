@@ -821,3 +821,66 @@ def test_convert_page_prioritize_moves_item_to_front_of_queue(
 
     manager = fake_conversion_manager.instances[-1]
     assert manager.added_files == ["/tmp/c.mp4", "/tmp/a.mp4", "/tmp/b.mp4"]
+
+
+def test_convert_page_skip_can_be_toggled_back_to_pending(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    convert_page_module,
+):
+    from src.core.convert_saved_task import ConvertQueueItemStatus
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/a.mp4"])
+    qapp.processEvents()
+
+    page._on_queue_skip_requested("/tmp/a.mp4")
+    assert page._queue_items[0].status is ConvertQueueItemStatus.SKIPPED
+    assert page._start_btn.isEnabled() is False
+
+    page._on_queue_skip_requested("/tmp/a.mp4")
+    assert page._queue_items[0].status is ConvertQueueItemStatus.PENDING
+    assert page._queue_widget.status_text_for("/tmp/a.mp4") == "Pending"
+    assert page._start_btn.isEnabled() is True
+
+
+def test_convert_page_cancel_marks_unstarted_rows_incomplete(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_conversion_manager,
+    convert_page_module,
+):
+    from src.data.models import ConversionJob
+    from src.ui.pages.convert_page import ConvertPage
+    from PyQt6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *args, **kwargs: 0))
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *args, **kwargs: 0))
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/a.mp4", "/tmp/b.mp4"])
+    qapp.processEvents()
+
+    page._on_start()
+    page._on_jobs_created(
+        [
+            ConversionJob(id=1, input_path="/tmp/a.mp4", output_path="/tmp/a_out.mp4"),
+            ConversionJob(id=2, input_path="/tmp/b.mp4", output_path="/tmp/b_out.mp4"),
+        ]
+    )
+    page._on_job_started(1)
+
+    page._on_cancel()
+    page._on_job_completed(1, False, "/tmp/a_out.mp4", "Cancelled by user")
+    page._on_all_completed()
+
+    assert page._queue_widget.status_text_for("/tmp/a.mp4") == "Cancelled by user"
+    assert page._queue_widget.status_text_for("/tmp/b.mp4") == "Cancelled before start"

@@ -113,7 +113,8 @@ class _ConvertQueueRow(QWidget):
         self._move_up_btn.setEnabled(can_reorder and not is_first)
         self._move_down_btn.setEnabled(can_reorder and not is_last)
         self._prioritize_btn.setEnabled(can_reorder and not is_first)
-        self._skip_btn.setEnabled(actions_enabled and not is_processing and not is_skipped)
+        self._skip_btn.setText("Unskip" if is_skipped else "Skip")
+        self._skip_btn.setEnabled(actions_enabled and not is_processing)
 
         self.style().unpolish(self)
         self.style().polish(self)
