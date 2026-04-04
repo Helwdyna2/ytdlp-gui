@@ -1622,15 +1622,6 @@ class ConvertPage(QWidget):
         elif not startable_items:
             return []
 
-        if not startable_items:
-            QMessageBox.information(
-                self,
-                "Nothing To Convert",
-                "All queued files are currently skipped. Unskip at least one file to start.",
-            )
-            self._update_start_button_state()
-            return []
-
         return startable_items
 
     def _start_conversion_for_queue_items(
