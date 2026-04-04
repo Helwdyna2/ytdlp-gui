@@ -787,6 +787,7 @@ class ConvertPage(QWidget):
     ) -> None:
         """Restore queue state and settings from a saved Convert task."""
         self._cancel_preflight_scan()
+        self._cancel_inflight_scan()
         self._job_id_to_queue_item_id = {}
         self._active_queue_item_id = None
         self._cancel_requested_during_run = False
@@ -914,8 +915,7 @@ class ConvertPage(QWidget):
         elif self._pause_requested_during_run:
             self._mark_unstarted_queue_items_incomplete(detail="Paused before start")
 
-        self._file_list.set_enabled(True)
-        self._queue_widget.set_actions_enabled(True)
+        self._set_run_controls_locked(False)
         self._cancel_btn.setVisible(False)
         self._overall_progress.setVisible(False)
 
@@ -1205,6 +1205,36 @@ class ConvertPage(QWidget):
             self._preflight_worker.cancel()
             self._preflight_worker.deleteLater()
             self._preflight_worker = None
+
+    def _cancel_inflight_scan(self) -> None:
+        """Cancel any in-progress folder scan and reset scanning UI state."""
+        if self._file_list._scan_worker is not None:
+            self._file_list._scan_worker.quit()
+            self._file_list._scan_worker.wait()
+            self._file_list._scan_worker.deleteLater()
+            self._file_list._scan_worker = None
+
+        self._file_list._scan_root = None
+        self._file_list._add_files_btn.setEnabled(True)
+        self._file_list._add_folder_btn.setEnabled(True)
+        self._file_list._add_folder_btn.setText("Add Folder")
+        self._file_list._update_loading_state()
+
+    def _set_run_controls_locked(self, locked: bool) -> None:
+        """Lock or unlock file list, queue, and settings controls during a run."""
+        self._file_list.set_enabled(not locked)
+        self._queue_widget.set_actions_enabled(not locked)
+        self._codec_combo.setEnabled(not locked)
+        self._resolution_combo.setEnabled(not locked)
+        self._crf_slider.setEnabled(not locked)
+        self._preset_combo.setEnabled(not locked)
+        self._source_codec_filter_check.setEnabled(not locked)
+        self._output_input.setEnabled(not locked)
+        self._output_browse_btn.setEnabled(not locked)
+        if locked:
+            self._hw_combo.setEnabled(False)
+        else:
+            self._hw_combo.setEnabled(self._hw_combo.count() > 1)
 
     def _on_preflight_scan_completed(
         self, request_id: int, worker: FFprobeWorker, results: List[object]
@@ -1658,8 +1688,7 @@ class ConvertPage(QWidget):
         self._conversion_manager.jobs_created.connect(self._on_jobs_created)
         self._conversion_manager.files_deleted.connect(self._on_files_deleted)
 
-        self._file_list.set_enabled(False)
-        self._queue_widget.set_actions_enabled(False)
+        self._set_run_controls_locked(True)
         self._start_btn.setEnabled(False)
         self._cancel_btn.setVisible(True)
 
@@ -1808,10 +1837,18 @@ class ConvertPage(QWidget):
             )
             return
 
-        if not self._has_startable_queue_items():
+        has_startable = self._has_startable_queue_items()
+        has_skipped = any(
+            item.status == ConvertQueueItemStatus.SKIPPED
+            for item in self._queue_items
+        )
+        if has_skipped and not has_startable:
             self._preflight_status_label.setText(
                 "All queued files are skipped. Unskip at least one file to start."
             )
+            return
+        if not has_startable:
+            self._preflight_status_label.setText("")
             return
 
         if not self._source_codec_filter_check.isChecked():
