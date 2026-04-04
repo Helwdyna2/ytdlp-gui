@@ -685,6 +685,54 @@ def test_convert_page_warns_when_audio_copy_is_incompatible_on_start(
     assert warnings[0][0] == "Audio Copy Not Supported"
 
 
+def test_convert_page_blocks_incompatible_audio_copy_for_same_as_source_mp4(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    """Same-as-source with an MP4 source should reject a vorbis audio track."""
+    from src.ui.pages.convert_page import ConvertPage
+
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/clip.mp4": {
+            "codec": "h264",
+            "audio_codec": "vorbis",
+            "width": 1920,
+            "height": 1080,
+        },
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/clip.mp4"])
+    qapp.processEvents()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("source"))
+
+    assert page._start_btn.isEnabled() is False
+    assert "Copy audio is unavailable" in page._preflight_status_label.text()
+
+
+def test_convert_page_blocks_incompatible_audio_copy_for_same_as_source_webm(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    """Same-as-source with a WebM source should reject an aac audio track."""
+    from src.ui.pages.convert_page import ConvertPage
+
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/clip.webm": {
+            "codec": "vp9",
+            "audio_codec": "aac",
+            "width": 1920,
+            "height": 1080,
+        },
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/clip.webm"])
+    qapp.processEvents()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("source"))
+
+    assert page._start_btn.isEnabled() is False
+    assert "Copy audio is unavailable" in page._preflight_status_label.text()
+
+
 def test_convert_page_no_audio_allows_incompatible_source_audio(
     qapp,
     monkeypatch,

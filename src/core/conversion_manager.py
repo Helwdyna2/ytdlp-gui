@@ -386,7 +386,8 @@ class ConversionManager(QObject):
         logger.info(f"Started conversion job {job_id}")
 
     def _on_command_built(self, job_id: int, input_path: str, command: str) -> None:
-        """Forward the exact FFmpeg command for a running job."""
+        """Forward the exact FFmpeg command for a running job and persist it."""
+        self._repository.update_ffmpeg_command(job_id, command)
         self.job_command_built.emit(job_id, input_path, command)
 
     def _on_progress(self, job_id: int, percent: float, speed: str, eta: str) -> None:

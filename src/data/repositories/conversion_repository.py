@@ -38,8 +38,8 @@ class ConversionRepository:
                 input_path, output_path, status, output_codec, crf_value,
                 preset, hardware_encoder, progress_percent, error_message,
                 input_size, output_size, duration, created_at, completed_at,
-                source_codec, ffmpeg_command
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                source_codec
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job.input_path,
@@ -57,7 +57,6 @@ class ConversionRepository:
                 job.created_at.isoformat(),
                 job.completed_at.isoformat() if job.completed_at else None,
                 job.source_codec,
-                job.ffmpeg_command,
             )
         )
         job.id = cursor.lastrowid
@@ -94,6 +93,14 @@ class ConversionRepository:
             )
         )
         logger.debug(f"Updated conversion job {job.id}: status={job.status.value}")
+
+    def update_ffmpeg_command(self, job_id: int, ffmpeg_command: str) -> None:
+        """Persist the built FFmpeg command for a job after it has been constructed."""
+        self._db.execute(
+            "UPDATE conversion_jobs SET ffmpeg_command = ? WHERE id = ?",
+            (ffmpeg_command, job_id),
+        )
+        logger.debug(f"Saved ffmpeg_command for job {job_id}")
 
     def get_by_id(self, job_id: int) -> Optional[ConversionJob]:
         """

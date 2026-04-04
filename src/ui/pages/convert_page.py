@@ -823,7 +823,7 @@ class ConvertPage(QWidget):
                 "The selected output container cannot copy one or more source audio tracks. "
                 "Choose No audio or use files with a compatible audio codec.\n\n"
                 f"Output format: {output_label}\n\n"
-                f"Affected files:\n" + "\n".join(incompatible_names) + suffix,
+                "Affected files:\n" + "\n".join(incompatible_names) + suffix,
             )
             return
 
@@ -1284,18 +1284,32 @@ class ConvertPage(QWidget):
             return []
 
         selected_output_codec = self._get_selected_output_codec()
-        if selected_output_codec not in {"h264", "hevc", "vp9"}:
-            return []
+        is_same_as_source = selected_output_codec == SAME_AS_SOURCE_CODEC
 
-        allowed_audio_codecs = (
-            WEBM_COPY_COMPATIBLE_AUDIO_CODECS
-            if selected_output_codec == "vp9"
-            else MP4_COPY_COMPATIBLE_AUDIO_CODECS
-        )
+        if not is_same_as_source and selected_output_codec not in {"h264", "hevc", "vp9"}:
+            return []
 
         paths = input_paths if input_paths is not None else self._file_list.get_file_paths()
         incompatible_paths: List[str] = []
         for path in paths:
+            if is_same_as_source:
+                resolved = resolve_conversion_output_codec(
+                    SAME_AS_SOURCE_CODEC, self._file_codecs.get(path)
+                )
+                if resolved is None:
+                    continue
+                allowed_audio_codecs = (
+                    WEBM_COPY_COMPATIBLE_AUDIO_CODECS
+                    if resolved == "vp9"
+                    else MP4_COPY_COMPATIBLE_AUDIO_CODECS
+                )
+            else:
+                allowed_audio_codecs = (
+                    WEBM_COPY_COMPATIBLE_AUDIO_CODECS
+                    if selected_output_codec == "vp9"
+                    else MP4_COPY_COMPATIBLE_AUDIO_CODECS
+                )
+
             metadata = self._file_metadata.get(path)
             audio_codec = getattr(metadata, "audio_codec", "")
             normalized_audio_codec = normalize_conversion_codec(audio_codec)
@@ -1529,6 +1543,7 @@ class ConvertPage(QWidget):
             self._file_list.count() > 0
             and not self._file_list.is_busy()
             and self._preflight_worker is None
+            and not self._unsupported_source_output_paths()
             and not self._incompatible_audio_copy_paths()
             and not self._cancel_btn.isVisible()
         )
