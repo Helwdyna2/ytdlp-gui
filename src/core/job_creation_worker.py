@@ -39,6 +39,7 @@ class JobCreationWorker(QThread):
         input_paths: List[str],
         output_dir: str,
         output_paths: Optional[Dict[str, str]],
+        *,
         source_codecs: Optional[Dict[str, str]],
         config: ConversionConfig,
         repository: ConversionRepository,

@@ -200,6 +200,10 @@ class Database:
             if current < 3:
                 self._migrate_to_v3()
 
+            # Migration 4: Add source_codec and ffmpeg_command to conversion_jobs
+            if current < 4:
+                self._migrate_to_v4()
+
     def _migrate_to_v2(self) -> None:
         """Migration v2: Add updated_at column to downloads table."""
         logger.info("Running migration v2: Adding updated_at column to downloads table")
@@ -271,6 +275,24 @@ class Database:
             (3, "Add conversion_jobs table")
         )
         logger.info("Migration v3 completed")
+
+    def _migrate_to_v4(self) -> None:
+        """Migration v4: Add source_codec and ffmpeg_command columns to conversion_jobs."""
+        logger.info("Running migration v4: Adding source_codec and ffmpeg_command to conversion_jobs")
+
+        columns = self.fetchall("PRAGMA table_info(conversion_jobs)")
+        column_names = [col['name'] for col in columns]
+
+        if 'source_codec' not in column_names:
+            self.execute("ALTER TABLE conversion_jobs ADD COLUMN source_codec TEXT")
+        if 'ffmpeg_command' not in column_names:
+            self.execute("ALTER TABLE conversion_jobs ADD COLUMN ffmpeg_command TEXT")
+
+        self.execute(
+            "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
+            (4, "Add source_codec and ffmpeg_command to conversion_jobs")
+        )
+        logger.info("Migration v4 completed")
 
     def close(self) -> None:
         """Close all database connections."""

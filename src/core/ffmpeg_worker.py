@@ -46,6 +46,7 @@ class FFmpegWorker(QThread):
         input_path: str,
         output_path: str,
         config: ConversionConfig,
+        *,
         source_codec: Optional[str] = None,
         parent=None,
     ):

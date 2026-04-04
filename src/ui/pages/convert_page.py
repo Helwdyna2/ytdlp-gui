@@ -395,6 +395,7 @@ class ConvertPage(QWidget):
         self._failed_count: int = 0
         self._config_service = ConfigService()
         self._hardware_encoders: List[HardwareEncoder] = []
+        self._saved_hw_encoder: Optional[str] = None
         self._file_codecs: Dict[str, str] = {}
         self._file_metadata: Dict[str, object] = {}
         self._job_input_paths: Dict[int, str] = {}
@@ -804,7 +805,7 @@ class ConvertPage(QWidget):
                 self,
                 "Unsupported Source Format",
                 "Same as source is only available for H.264, H.265, VP9, MP3, AAC, and FLAC inputs.\n\n"
-                f"Unsupported files:\n" + "\n".join(unsupported_names) + suffix,
+                "Unsupported files:\n" + "\n".join(unsupported_names) + suffix,
             )
             return
 
@@ -1318,10 +1319,8 @@ class ConvertPage(QWidget):
         """Populate the hardware acceleration combo for the selected codec."""
         output_codec = self._get_selected_output_codec()
         if output_codec == SAME_AS_SOURCE_CODEC:
+            self._saved_hw_encoder = self._hw_combo.currentData()
             self._hw_combo.blockSignals(True)
-            self._hw_combo.clear()
-            self._hw_combo.addItem("Not available for this format", None)
-            self._hw_combo.setCurrentIndex(0)
             self._hw_combo.setEnabled(False)
             status_message = (
                 "Hardware acceleration is unavailable when output format is set to Same as source."
@@ -1331,6 +1330,12 @@ class ConvertPage(QWidget):
             self._hw_status_label.setVisible(True)
             self._hw_combo.blockSignals(False)
             return
+
+        # Restore saved encoder selection when leaving SAME_AS_SOURCE_CODEC
+        if preferred_name is None and self._saved_hw_encoder is not None:
+            preferred_name = self._saved_hw_encoder
+            prefer_none = False
+        self._saved_hw_encoder = None
 
         hardware_supported = output_codec in {"h264", "hevc"}
         compatible_encoders = get_compatible_hardware_encoders(
@@ -1524,7 +1529,6 @@ class ConvertPage(QWidget):
             self._file_list.count() > 0
             and not self._file_list.is_busy()
             and self._preflight_worker is None
-            and not self._unsupported_source_output_paths()
             and not self._incompatible_audio_copy_paths()
             and not self._cancel_btn.isVisible()
         )

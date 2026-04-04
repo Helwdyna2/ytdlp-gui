@@ -37,8 +37,9 @@ class ConversionRepository:
             INSERT INTO conversion_jobs (
                 input_path, output_path, status, output_codec, crf_value,
                 preset, hardware_encoder, progress_percent, error_message,
-                input_size, output_size, duration, created_at, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                input_size, output_size, duration, created_at, completed_at,
+                source_codec, ffmpeg_command
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job.input_path,
@@ -55,6 +56,8 @@ class ConversionRepository:
                 job.duration,
                 job.created_at.isoformat(),
                 job.completed_at.isoformat() if job.completed_at else None,
+                job.source_codec,
+                job.ffmpeg_command,
             )
         )
         job.id = cursor.lastrowid

@@ -360,6 +360,8 @@ class ConversionJob:
             completed_at=datetime.fromisoformat(row["completed_at"])
             if row["completed_at"]
             else None,
+            source_codec=row["source_codec"] if "source_codec" in row.keys() else None,
+            ffmpeg_command=row["ffmpeg_command"] if "ffmpeg_command" in row.keys() else None,
         )
 
 

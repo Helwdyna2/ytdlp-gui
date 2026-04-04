@@ -860,13 +860,14 @@ def test_convert_page_same_as_source_passes_source_codecs_to_manager(
 
 
 def test_convert_page_view_log_button_shows_dialog(
-    qapp, fake_config_service, fake_ffprobe_worker
+    qtbot, fake_config_service, fake_ffprobe_worker
 ):
+    from PyQt6.QtCore import Qt
+
     from src.ui.pages.convert_page import ConvertPage
 
     page = ConvertPage()
 
-    page._view_log_btn.click()
-    qapp.processEvents()
+    qtbot.mouseClick(page._view_log_btn, Qt.MouseButton.LeftButton)
 
     assert page._process_log_dialog.isVisible() is True
