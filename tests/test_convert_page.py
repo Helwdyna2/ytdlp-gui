@@ -173,6 +173,10 @@ def fake_conversion_manager(monkeypatch, convert_page_module):
             self.added_files = None
             self.added_output_dir = None
             self.added_output_paths = None
+            self.started = False
+            self.cancelled = False
+            self.completed_count = 0
+            self.failed_count = 0
             type(self).instances.append(self)
 
         def set_config(self, config):
@@ -182,6 +186,16 @@ def fake_conversion_manager(monkeypatch, convert_page_module):
             self.added_files = list(files)
             self.added_output_dir = output_dir
             self.added_output_paths = output_paths
+
+        def start(self):
+            self.started = True
+
+        def cancel_all(self):
+            self.cancelled = True
+
+        def reset_counts(self):
+            self.completed_count = 0
+            self.failed_count = 0
 
     monkeypatch.setattr(convert_page_module, "ConversionManager", FakeConversionManager)
     FakeConversionManager.instances = []
@@ -740,3 +754,70 @@ def test_convert_page_preview_updates_output_extension(
 
     assert child_item is not None
     assert child_item.text(0).endswith("input_converted.webm")
+
+
+def test_convert_page_queue_status_text_updates_for_completed_job(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_conversion_manager,
+    convert_page_module,
+):
+    from src.data.models import ConversionJob
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/a.mp4"])
+    qapp.processEvents()
+
+    assert page._queue_widget.status_text_for("/tmp/a.mp4") == "Pending"
+    assert page._queue_widget.is_item_completed("/tmp/a.mp4") is False
+
+    page._on_jobs_created(
+        [
+            ConversionJob(
+                id=7,
+                input_path="/tmp/a.mp4",
+                output_path="/tmp/a_converted.mp4",
+            )
+        ]
+    )
+    page._on_job_started(7)
+    page._on_job_completed(7, True, "/tmp/a_converted.mp4", "")
+
+    assert page._queue_widget.status_text_for("/tmp/a.mp4") == "Complete"
+    assert page._queue_widget.is_item_completed("/tmp/a.mp4") is True
+
+
+def test_convert_page_prioritize_moves_item_to_front_of_queue(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_conversion_manager,
+    convert_page_module,
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+
+    paths = ["/tmp/a.mp4", "/tmp/b.mp4", "/tmp/c.mp4"]
+    page = ConvertPage()
+    page._file_list._add_paths(paths)
+    qapp.processEvents()
+
+    page._on_queue_prioritize_requested("/tmp/c.mp4")
+
+    assert [item.input_path for item in page._queue_items] == [
+        "/tmp/c.mp4",
+        "/tmp/a.mp4",
+        "/tmp/b.mp4",
+    ]
+
+    page._on_start()
+
+    manager = fake_conversion_manager.instances[-1]
+    assert manager.added_files == ["/tmp/c.mp4", "/tmp/a.mp4", "/tmp/b.mp4"]
