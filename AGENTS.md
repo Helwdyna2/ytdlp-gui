@@ -13,6 +13,14 @@ The application is a Python desktop GUI built around `PyQt6`. Main entry points 
 - `src/data/`: database models and repositories
 - `src/utils/`: shared helpers and platform utilities
 
+Saved-task recovery for the current Convert slice spans:
+
+- `src/data/repositories/saved_task_repository.py` for persistence
+- `src/services/saved_task_service.py` for orchestration
+- `src/core/convert_saved_task.py` for queue-item serialization/detection helpers
+- `src/ui/widgets/saved_tasks_dialog.py` and `src/ui/main_window.py` for manual/startup restore entry points
+- `src/ui/pages/convert_page.py` for Convert-specific restore/resume behavior
+
 Tests live in `tests/` and follow the source layout with `test_*.py` files. Design references are in `docs/` and `UI/`. Runtime data under `data/` is generated locally and should not be committed.
 
 ## Trim Editor Notes
@@ -55,6 +63,18 @@ For the Trim editor stack, prefer this focused validation loop while iterating:
 - `python -m py_compile` on touched editor/playback/trim modules when making render-path or signal-flow changes
 
 Passing headless tests is necessary but not sufficient for the player. Live desktop validation in `python run.py` is still required before calling playback/export behavior production-ready.
+
+For the Saved Tasks / Convert recovery stack, prefer this focused validation loop while iterating:
+
+- `QT_QPA_PLATFORM=offscreen PYTHONPATH=. .venv/bin/pytest tests/test_saved_task_repository.py tests/test_convert_saved_task.py tests/test_convert_page.py tests/test_conversion_manager.py tests/test_main_window_workbench.py -q`
+- `PYTHONPATH=. .venv/bin/python -m py_compile src/data/models.py src/data/database.py src/data/repositories/saved_task_repository.py src/services/saved_task_service.py src/core/convert_saved_task.py src/core/conversion_manager.py src/core/job_creation_worker.py src/ui/widgets/convert_queue_widget.py src/ui/widgets/saved_tasks_dialog.py src/ui/pages/convert_page.py src/ui/main_window.py src/main.py main.py`
+
+## Architecture Constraints & Gotchas
+
+- `MainWindow.prompt_restore_latest_saved_task()` must only prompt for task types with a real restore implementation. At this stage, only `convert` is restorable through the shared Saved Tasks shell.
+- `ConvertPage.restore_saved_task(...)` preserves persisted output paths via `_restored_output_paths`; do not recompute them away during restore/resume work.
+- Convert resume is intentionally conservative: only `pending` and `incomplete` items restart automatically. `completed` remain done, `skipped` remain skipped, and `failed` are not auto-rerun on restore.
+- `JobCreationWorker` cancellation must still end in a terminal manager callback. If you change async job creation, preserve the path where `ConversionManager` can emit `all_completed` after a cancel/pause during job creation, or the Convert UI will stay wedged in its disabled/running state.
 
 ## Commit & Pull Request Guidelines
 Recent history mixes short maintenance commits (`Cleanup`, `Redesign`) with conventional messages such as `feat(ui): ...`. Prefer the latter: `feat(area): summary`, `fix(area): summary`, or a concise imperative maintenance message when scope is obvious. PRs should include a short description, linked issue if applicable, test notes, and screenshots for UI changes.
