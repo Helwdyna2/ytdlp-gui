@@ -21,6 +21,36 @@ class Database:
 
     _instance: Optional['Database'] = None
     _lock = threading.Lock()
+    _SAVED_TASKS_REQUIRED_COLUMNS = {
+        "task_type",
+        "title",
+        "status",
+        "summary_json",
+        "payload_json",
+        "created_at",
+        "updated_at",
+    }
+    _SAVED_TASKS_LEGACY_COLUMNS = {"payload", "summary"}
+    _SAVED_TASKS_CREATE_SQL = """
+        CREATE TABLE IF NOT EXISTS saved_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            summary_json TEXT NOT NULL DEFAULT '{}',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP,
+            CONSTRAINT chk_saved_task_status CHECK (status IN ('active', 'paused', 'completed', 'failed', 'deleted'))
+        )
+    """
+    _SAVED_TASKS_INDEX_SQL = (
+        "CREATE INDEX IF NOT EXISTS idx_saved_tasks_status ON saved_tasks(status)",
+        "CREATE INDEX IF NOT EXISTS idx_saved_tasks_task_type ON saved_tasks(task_type)",
+        "CREATE INDEX IF NOT EXISTS idx_saved_tasks_updated_at ON saved_tasks(updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_saved_tasks_deleted_at ON saved_tasks(deleted_at)",
+    )
 
     def __new__(cls, db_path: Optional[str] = None):
         """Singleton pattern for database instance."""
@@ -104,6 +134,9 @@ class Database:
         # Check and run migrations
         self._run_migrations()
 
+        # Repair compatibility with the earlier v4 saved_tasks shape if needed.
+        self._ensure_saved_tasks_schema()
+
     def _create_tables(self) -> None:
         """Create database tables if they don't exist."""
         # Downloads table
@@ -156,6 +189,14 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_sessions_is_active ON sessions(is_active)
         """)
 
+        # Saved tasks table
+        if self._saved_tasks_table_is_current():
+            self._create_saved_tasks_schema()
+        elif not self._saved_tasks_table_exists():
+            self._create_saved_tasks_schema()
+        else:
+            logger.info("Legacy saved_tasks schema detected; repair deferred")
+
         # Config table
         self.execute("""
             CREATE TABLE IF NOT EXISTS config (
@@ -199,6 +240,10 @@ class Database:
             # Migration 3: Add conversion_jobs table
             if current < 3:
                 self._migrate_to_v3()
+
+            # Migration 4: Add saved_tasks table
+            if current < 4:
+                self._migrate_to_v4()
 
     def _migrate_to_v2(self) -> None:
         """Migration v2: Add updated_at column to downloads table."""
@@ -271,6 +316,154 @@ class Database:
             (3, "Add conversion_jobs table")
         )
         logger.info("Migration v3 completed")
+
+    def _migrate_to_v4(self) -> None:
+        """Migration v4: Add saved_tasks table."""
+        logger.info("Running migration v4: Adding saved_tasks table")
+
+        self._create_saved_tasks_schema()
+
+        self.execute(
+            "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
+            (4, "Add saved_tasks table")
+        )
+        logger.info("Migration v4 completed")
+
+    def _create_saved_tasks_schema(self) -> None:
+        """Create the current saved_tasks schema and supporting indexes."""
+        self.execute(self._SAVED_TASKS_CREATE_SQL)
+        for sql in self._SAVED_TASKS_INDEX_SQL:
+            self.execute(sql)
+
+    def _saved_tasks_table_exists(self) -> bool:
+        """Check whether the saved_tasks table exists."""
+        row = self.fetchone(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'saved_tasks'"
+        )
+        return row is not None
+
+    def _saved_tasks_table_is_current(self) -> bool:
+        """Check whether saved_tasks already has the current column layout."""
+        if not self._saved_tasks_table_exists():
+            return False
+
+        columns = self.fetchall("PRAGMA table_info(saved_tasks)")
+        column_names = {col["name"] for col in columns}
+        return self._SAVED_TASKS_REQUIRED_COLUMNS.issubset(column_names)
+
+    def _ensure_saved_tasks_schema(self) -> None:
+        """Repair older saved_tasks table shapes in-place when needed."""
+        if not self._saved_tasks_table_exists():
+            self._create_saved_tasks_schema()
+            return
+
+        columns = self.fetchall("PRAGMA table_info(saved_tasks)")
+        column_names = [col["name"] for col in columns]
+
+        if self._SAVED_TASKS_REQUIRED_COLUMNS.issubset(column_names):
+            self._create_saved_tasks_schema()
+            return
+
+        if self._SAVED_TASKS_LEGACY_COLUMNS.intersection(column_names) or not self._SAVED_TASKS_REQUIRED_COLUMNS.issubset(column_names):
+            self._repair_legacy_saved_tasks_schema(column_names)
+
+    def _repair_legacy_saved_tasks_schema(self, existing_columns: list[str]) -> None:
+        """Upgrade the earlier v4 saved_tasks table to the corrected schema."""
+        logger.info("Repairing legacy saved_tasks schema")
+
+        legacy_name = "saved_tasks_legacy_v4"
+        conn = self._get_connection()
+        with self._db_lock:
+            try:
+                conn.execute("BEGIN")
+                conn.execute(f"ALTER TABLE saved_tasks RENAME TO {legacy_name}")
+                conn.execute(self._SAVED_TASKS_CREATE_SQL)
+
+                legacy_columns = set(existing_columns)
+                rows = conn.execute(f"SELECT * FROM {legacy_name} ORDER BY id").fetchall()
+                for row in rows:
+                    raw_summary = row["summary"] if "summary" in legacy_columns else "{}"
+                    raw_payload = row["payload"] if "payload" in legacy_columns else "{}"
+                    status = self._normalize_saved_task_status(row["status"] if "status" in legacy_columns else None)
+                    task_type, title = self._derive_saved_task_identity(raw_summary, raw_payload)
+                    conn.execute(
+                        """
+                        INSERT INTO saved_tasks (
+                            id, task_type, title, status, summary_json, payload_json,
+                            created_at, updated_at, deleted_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            row["id"],
+                            task_type,
+                            title,
+                            status,
+                            raw_summary,
+                            raw_payload,
+                            row["created_at"],
+                            row["updated_at"],
+                            row["deleted_at"],
+                        ),
+                    )
+
+                conn.execute(f"DROP TABLE {legacy_name}")
+                for sql in self._SAVED_TASKS_INDEX_SQL:
+                    conn.execute(sql)
+                conn.execute(
+                    "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
+                    (4, "Repair saved_tasks schema"),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+    @staticmethod
+    def _normalize_saved_task_status(status: Optional[str]) -> str:
+        """Map legacy saved task statuses to the unified vocabulary."""
+        mapping = {
+            "pending": "active",
+            "in_progress": "paused",
+            "active": "active",
+            "paused": "paused",
+            "completed": "completed",
+            "failed": "failed",
+            "deleted": "deleted",
+        }
+        return mapping.get(status or "", "active")
+
+    @staticmethod
+    def _derive_saved_task_identity(summary_json: str, payload_json: str) -> tuple[str, str]:
+        """Infer task_type/title for legacy rows from their JSON blobs."""
+        import json
+
+        summary: dict = {}
+        payload: dict = {}
+        try:
+            summary_obj = json.loads(summary_json or "{}")
+            if isinstance(summary_obj, dict):
+                summary = summary_obj
+        except json.JSONDecodeError:
+            summary = {}
+
+        try:
+            payload_obj = json.loads(payload_json or "{}")
+            if isinstance(payload_obj, dict):
+                payload = payload_obj
+        except json.JSONDecodeError:
+            payload = {}
+
+        task_type = str(
+            summary.get("task_type")
+            or payload.get("task_type")
+            or "legacy"
+        )
+        title = str(
+            summary.get("title")
+            or payload.get("title")
+            or "Recovered saved task"
+        )
+        return task_type, title
 
     def close(self) -> None:
         """Close all database connections."""

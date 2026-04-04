@@ -22,6 +22,13 @@ from PyQt6.QtWidgets import (
     QMessageBox,
 )
 
+from ...core.convert_saved_task import (
+    ConvertQueueItem,
+    ConvertQueueItemStatus,
+    build_convert_task_payload,
+    detect_existing_outputs,
+    load_convert_task_payload,
+)
 from ...core.conversion_manager import ConversionManager
 from ...core.conversion_paths import (
     build_conversion_output_name,
@@ -51,6 +58,7 @@ from ...utils.hardware_accel import (
 from ..components.page_header import PageHeader
 from ..components.split_layout import SplitLayout
 from ..components.data_panel import DataPanel
+from ..widgets.convert_queue_widget import ConvertQueueWidget
 from ..widgets.folder_preview_widget import FolderPreviewWidget
 
 logger = logging.getLogger(__name__)
@@ -373,9 +381,12 @@ class ConvertPage(QWidget):
         self._conversion_manager: Optional[ConversionManager] = conversion_manager
         self._preflight_worker: Optional[FFprobeWorker] = None
         self._preflight_request_id = 0
-        self._pending_job_widgets: Dict[int, str] = {}  # job_id -> filename
-        self._done_count: int = 0
-        self._failed_count: int = 0
+        self._queue_items: List[ConvertQueueItem] = []
+        self._job_id_to_queue_item_id: Dict[int, str] = {}
+        self._active_queue_item_id: Optional[str] = None
+        self._cancel_requested_during_run = False
+        self._pause_requested_during_run = False
+        self._restored_output_paths: Dict[str, str] = {}
         self._config_service = ConfigService()
         self._hardware_encoders: List[HardwareEncoder] = []
         self._file_codecs: Dict[str, str] = {}
@@ -418,10 +429,13 @@ class ConvertPage(QWidget):
         self._file_list = FileListWidget()
         files_panel.body_layout.addWidget(self._file_list)
 
-        self._jobs_list = QListWidget()
-        self._jobs_list.setMaximumHeight(120)
-        self._jobs_list.setVisible(False)
-        files_panel.body_layout.addWidget(self._jobs_list)
+        queue_label = QLabel("Queue")
+        files_panel.body_layout.addWidget(queue_label)
+
+        self._queue_widget = ConvertQueueWidget()
+        self._queue_widget.setVisible(False)
+        self._queue_widget.setMinimumHeight(120)
+        files_panel.body_layout.addWidget(self._queue_widget)
 
         self._overall_progress = QProgressBar()
         self._overall_progress.setVisible(False)
@@ -547,6 +561,11 @@ class ConvertPage(QWidget):
         """Wire up all signal connections."""
         self._file_list.files_changed.connect(self._on_files_changed)
         self._file_list.loading_state_changed.connect(self._on_file_list_loading_changed)
+        self._queue_widget.reorder_requested.connect(self._on_queue_reorder_requested)
+        self._queue_widget.skip_requested.connect(self._on_queue_skip_requested)
+        self._queue_widget.prioritize_requested.connect(
+            self._on_queue_prioritize_requested
+        )
         self._start_btn.clicked.connect(self._on_start)
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._crf_slider.valueChanged.connect(self._on_crf_changed)
@@ -559,7 +578,9 @@ class ConvertPage(QWidget):
         self._source_codec_filter_check.toggled.connect(
             self._on_skip_matching_output_toggled
         )
+        self._output_input.textChanged.connect(self._on_output_dir_changed)
         self._output_input.textChanged.connect(self._on_settings_changed)
+        self._output_input.textChanged.connect(self._sync_queue_items)
         self._output_input.textChanged.connect(self._update_preview)
         self._output_browse_btn.clicked.connect(self._on_browse_output)
         self._expand_all_btn.clicked.connect(self._preview_tree.expandAll)
@@ -602,6 +623,7 @@ class ConvertPage(QWidget):
         finally:
             self._loading_settings = False
 
+        self._sync_queue_items()
         self._update_start_button_state()
 
     def _save_settings(self) -> None:
@@ -649,23 +671,35 @@ class ConvertPage(QWidget):
 
     def _on_output_codec_changed(self) -> None:
         """Refresh dependent controls when the output codec changes."""
+        self._clear_auto_skipped_queue_items()
+        self._restored_output_paths = {}
         preferred_hardware = self._hw_combo.currentData()
         self._refresh_hardware_options(
             preferred_name=preferred_hardware, prefer_none=preferred_hardware is None
         )
+        self._sync_queue_items()
         self._update_preview()
         self._update_start_button_state()
         self._on_settings_changed()
 
     def _on_resolution_changed(self) -> None:
         """Refresh queue readiness when the output resolution changes."""
+        self._clear_auto_skipped_queue_items()
+        self._restored_output_paths = {}
+        self._sync_queue_items()
+        self._update_preview()
         self._on_settings_changed()
         self._update_start_button_state()
 
     def _on_skip_matching_output_toggled(self) -> None:
         """Refresh queue readiness when skip-matching is toggled."""
+        self._clear_auto_skipped_queue_items()
         self._on_settings_changed()
         self._update_start_button_state()
+
+    def _on_output_dir_changed(self) -> None:
+        """Clear restored output paths when output directory changes."""
+        self._restored_output_paths = {}
 
     def _on_settings_changed(self) -> None:
         """Save settings on any change."""
@@ -685,6 +719,7 @@ class ConvertPage(QWidget):
 
     def _on_files_changed(self) -> None:
         """Refresh queue readiness when the file set changes."""
+        self._sync_queue_items()
         self._refresh_preflight_scan()
         self._update_preview()
         self._update_start_button_state()
@@ -695,9 +730,9 @@ class ConvertPage(QWidget):
 
     def _on_start(self) -> None:
         """Start conversion."""
-        files = self._file_list.get_file_paths()
-        if not files:
+        if not self._queue_items:
             return
+        self._clear_auto_skipped_queue_items()
 
         if self._file_list.is_busy() or self._preflight_worker is not None:
             QMessageBox.information(
@@ -707,75 +742,71 @@ class ConvertPage(QWidget):
             )
             return
 
-        files_to_convert = files
-        selected_output_format = self._codec_combo.currentText()
-        if self._source_codec_filter_check.isChecked():
-            files_to_convert = [
-                path
-                for path in files
-                if not self._matches_selected_output_format(path)
-            ]
-            skipped_count = len(files) - len(files_to_convert)
-            if not files_to_convert:
-                QMessageBox.information(
-                    self,
-                    "Nothing To Convert",
-                    f'All selected files already match "{selected_output_format}".',
-                )
-                return
-            if skipped_count > 0:
-                QMessageBox.information(
-                    self,
-                    "Skipping Matching Files",
-                    f"Skipping {skipped_count} file(s) that already match {selected_output_format}.",
-                )
-
-        config = self._build_config()
-        output_paths = self._build_output_paths(
-            files_to_convert, config.output_dir
-        )
-
-        # Create manager
-        self._conversion_manager = ConversionManager()
-        self._conversion_manager.set_config(config)
-
-        # Connect manager signals
-        self._conversion_manager.job_started.connect(self._on_job_started)
-        self._conversion_manager.job_progress.connect(self._on_job_progress)
-        self._conversion_manager.job_completed.connect(self._on_job_completed)
-        self._conversion_manager.queue_progress.connect(self._on_queue_progress)
-        self._conversion_manager.all_completed.connect(self._on_all_completed)
-        self._conversion_manager.job_creation_progress.connect(
-            self._on_job_creation_progress
-        )
-        self._conversion_manager.jobs_created.connect(self._on_jobs_created)
-        self._conversion_manager.files_deleted.connect(self._on_files_deleted)
-
-        # Disable controls while running
-        self._file_list.set_enabled(False)
-        self._start_btn.setEnabled(False)
-        self._cancel_btn.setVisible(True)
-
-        # Show preparing status
-        self._overall_progress.setMaximum(len(files_to_convert))
-        self._overall_progress.setValue(0)
-        self._overall_progress.setVisible(True)
-        self._jobs_list.setVisible(False)
-
-        self.start_requested.emit()
-
-        # Start async job creation (non-blocking)
-        self._conversion_manager.add_files_async(
-            files_to_convert,
-            config.output_dir,
-            output_paths=output_paths,
-        )
+        startable_items = self._prepare_queue_items_for_start(self._queue_items)
+        self._start_conversion_for_queue_items(startable_items)
 
     def _on_cancel(self) -> None:
         """Cancel all conversions."""
+        self._cancel_requested_during_run = True
         if self._conversion_manager:
             self._conversion_manager.cancel_all()
         self.cancel_requested.emit()
+
+    def pause_for_saved_task(self) -> dict:
+        """Pause the current run and return a persistence payload."""
+        is_running = (
+            self._conversion_manager is not None
+            and (
+                bool(self._job_id_to_queue_item_id)
+                or self._active_queue_item_id is not None
+                or self._cancel_btn.isVisible()
+            )
+        )
+        if is_running:
+            self._pause_requested_during_run = True
+            if self._conversion_manager:
+                self._conversion_manager.cancel_all()
+            self._mark_active_queue_item_incomplete()
+            self._mark_unstarted_queue_items_incomplete(
+                detail="Paused before start"
+            )
+        return self.build_saved_task_payload()
+
+    def build_saved_task_payload(self) -> dict:
+        """Serialize the current convert queue and settings for persistence."""
+        return build_convert_task_payload(
+            self._queue_items,
+            self._build_config_payload(),
+        )
+
+    def restore_saved_task(
+        self,
+        payload: dict,
+        config_payload: Optional[dict] = None,
+        saved_task_id: Optional[int] = None,
+    ) -> None:
+        """Restore queue state and settings from a saved Convert task."""
+        self._cancel_preflight_scan()
+        self._cancel_inflight_scan()
+        self._job_id_to_queue_item_id = {}
+        self._active_queue_item_id = None
+        self._cancel_requested_during_run = False
+        self._pause_requested_during_run = False
+
+        self._apply_config_payload(config_payload or payload.get("config", {}))
+        restored_items = self._normalize_restored_queue_items(
+            load_convert_task_payload(payload)
+        )
+        restored_items = detect_existing_outputs(restored_items)
+        self._restored_output_paths = {
+            item.input_path: item.output_path for item in restored_items
+        }
+        self._set_restored_file_entries(restored_items)
+        self._queue_items = restored_items
+        self._refresh_queue_widget()
+        self._refresh_preflight_scan()
+        self._update_preview()
+        self._update_start_button_state()
 
     # ------------------------------------------------------------------
     # Manager signal handlers
@@ -787,58 +818,90 @@ class ConvertPage(QWidget):
 
     def _on_jobs_created(self, jobs: List[ConversionJob]) -> None:
         """Prepare progress display once all jobs are created."""
-        self._pending_job_widgets = {}
+        self._job_id_to_queue_item_id = {}
         for job in jobs:
             if job.id is not None:
-                self._pending_job_widgets[job.id] = Path(job.input_path).name
-
-        self._done_count = 0
-        self._failed_count = 0
-        self._jobs_list.clear()
-        self._jobs_list.setVisible(bool(jobs))
+                queue_item = self._find_queue_item_by_path(job.input_path)
+                if queue_item is not None:
+                    self._job_id_to_queue_item_id[job.id] = queue_item.item_id
         self._overall_progress.setMaximum(len(jobs))
         self._overall_progress.setValue(0)
+        self._refresh_queue_widget()
 
         self.conversion_started.emit()
 
         # Start processing
-        self._conversion_manager.start()
+        if self._conversion_manager is not None:
+            self._conversion_manager.start()
 
     def _on_job_started(self, job_id: int) -> None:
-        """Add job entry to the jobs list when it starts."""
-        if job_id in self._pending_job_widgets:
-            filename = self._pending_job_widgets.pop(job_id)
-            item = QListWidgetItem(f"{filename} — Converting…")
-            item.setData(Qt.ItemDataRole.UserRole, job_id)
-            self._jobs_list.addItem(item)
+        """Mark the matching queue item as in progress."""
+        queue_item_id = self._job_id_to_queue_item_id.get(job_id)
+        if queue_item_id is None:
+            return
+        self._active_queue_item_id = queue_item_id
+        self._update_queue_item(
+            queue_item_id,
+            status=ConvertQueueItemStatus.PROCESSING,
+            detail="Converting...",
+            progress_percent=0.0,
+            error_message="",
+        )
 
     def _on_job_progress(
         self, job_id: int, percent: float, speed: str, eta: str
     ) -> None:
-        """Update job list item text with progress info."""
-        for i in range(self._jobs_list.count()):
-            item = self._jobs_list.item(i)
-            if item and item.data(Qt.ItemDataRole.UserRole) == job_id:
-                name = item.text().split(" — ")[0]
-                item.setText(f"{name} — {percent:.0f}% | {speed} | ETA {eta}")
-                break
+        """Update the queue item progress details."""
+        queue_item_id = self._job_id_to_queue_item_id.get(job_id)
+        if queue_item_id is None:
+            return
+        self._update_queue_item(
+            queue_item_id,
+            status=ConvertQueueItemStatus.PROCESSING,
+            progress_percent=percent,
+            detail=f"{percent:.0f}% | {speed} | ETA {eta}",
+            error_message="",
+        )
 
     def _on_job_completed(
         self, job_id: int, success: bool, output_path: str, error: str
     ) -> None:
-        """Mark job as complete or failed in the list."""
-        for i in range(self._jobs_list.count()):
-            item = self._jobs_list.item(i)
-            if item and item.data(Qt.ItemDataRole.UserRole) == job_id:
-                name = item.text().split(" — ")[0]
-                if success:
-                    self._done_count += 1
-                    item.setText(f"{name} — Complete")
-                else:
-                    self._failed_count += 1
-                    status = "Cancelled" if "Cancelled" in error else "Failed"
-                    item.setText(f"{name} — {status}")
-                break
+        """Mark job as complete or failed in the queue."""
+        queue_item_id = self._job_id_to_queue_item_id.get(job_id)
+        if queue_item_id is None:
+            return
+
+        if success:
+            if self._active_queue_item_id == queue_item_id:
+                self._active_queue_item_id = None
+            self._update_queue_item(
+                queue_item_id,
+                status=ConvertQueueItemStatus.COMPLETED,
+                progress_percent=100.0,
+                detail="Complete",
+                error_message="",
+            )
+            return
+
+        error_text = error or "Failed"
+        was_cancelled = "cancelled" in error_text.lower() or "canceled" in error_text.lower()
+        if self._active_queue_item_id == queue_item_id:
+            self._active_queue_item_id = None
+        self._update_queue_item(
+            queue_item_id,
+            status=(
+                ConvertQueueItemStatus.INCOMPLETE
+                if was_cancelled
+                else ConvertQueueItemStatus.FAILED
+            ),
+            detail=(
+                "Restart from beginning"
+                if was_cancelled and self._pause_requested_during_run
+                else ("Cancelled" if was_cancelled else "Failed")
+            ),
+            progress_percent=0.0 if was_cancelled else None,
+            error_message=error_text,
+        )
 
     def _on_queue_progress(self, completed: int, total: int, in_progress: int) -> None:
         """Update overall progress bar."""
@@ -847,7 +910,12 @@ class ConvertPage(QWidget):
 
     def _on_all_completed(self) -> None:
         """Reset UI after all conversions finish."""
-        self._file_list.set_enabled(True)
+        if self._cancel_requested_during_run:
+            self._mark_unstarted_queue_items_incomplete()
+        elif self._pause_requested_during_run:
+            self._mark_unstarted_queue_items_incomplete(detail="Paused before start")
+
+        self._set_run_controls_locked(False)
         self._cancel_btn.setVisible(False)
         self._overall_progress.setVisible(False)
 
@@ -857,7 +925,9 @@ class ConvertPage(QWidget):
 
             self.conversion_completed.emit(completed, failed)
 
-            if failed == 0:
+            if self._pause_requested_during_run:
+                pass
+            elif failed == 0:
                 QMessageBox.information(
                     self,
                     "Conversion Complete",
@@ -872,10 +942,10 @@ class ConvertPage(QWidget):
 
             self._conversion_manager.reset_counts()
 
-        self._done_count = 0
-        self._failed_count = 0
-        if self._jobs_list.count() == 0:
-            self._jobs_list.setVisible(False)
+        self._job_id_to_queue_item_id = {}
+        self._active_queue_item_id = None
+        self._cancel_requested_during_run = False
+        self._pause_requested_during_run = False
         self._update_start_button_state()
 
     def _on_files_deleted(self, count: int, paths: List[str]) -> None:
@@ -1136,6 +1206,36 @@ class ConvertPage(QWidget):
             self._preflight_worker.deleteLater()
             self._preflight_worker = None
 
+    def _cancel_inflight_scan(self) -> None:
+        """Cancel any in-progress folder scan and reset scanning UI state."""
+        if self._file_list._scan_worker is not None:
+            self._file_list._scan_worker.quit()
+            self._file_list._scan_worker.wait()
+            self._file_list._scan_worker.deleteLater()
+            self._file_list._scan_worker = None
+
+        self._file_list._scan_root = None
+        self._file_list._add_files_btn.setEnabled(True)
+        self._file_list._add_folder_btn.setEnabled(True)
+        self._file_list._add_folder_btn.setText("Add Folder")
+        self._file_list._update_loading_state()
+
+    def _set_run_controls_locked(self, locked: bool) -> None:
+        """Lock or unlock file list, queue, and settings controls during a run."""
+        self._file_list.set_enabled(not locked)
+        self._queue_widget.set_actions_enabled(not locked)
+        self._codec_combo.setEnabled(not locked)
+        self._resolution_combo.setEnabled(not locked)
+        self._crf_slider.setEnabled(not locked)
+        self._preset_combo.setEnabled(not locked)
+        self._source_codec_filter_check.setEnabled(not locked)
+        self._output_input.setEnabled(not locked)
+        self._output_browse_btn.setEnabled(not locked)
+        if locked:
+            self._hw_combo.setEnabled(False)
+        else:
+            self._hw_combo.setEnabled(self._hw_combo.count() > 1)
+
     def _on_preflight_scan_completed(
         self, request_id: int, worker: FFprobeWorker, results: List[object]
     ) -> None:
@@ -1159,6 +1259,7 @@ class ConvertPage(QWidget):
                     self._file_codecs[file_path] = self._normalize_source_codec(codec)
 
         self._refresh_resolution_options()
+        self._sync_queue_items()
         self._update_start_button_state()
 
     def _on_preflight_scan_error(
@@ -1189,6 +1290,59 @@ class ConvertPage(QWidget):
             output_dir=self._output_input.text() or None,
         )
 
+    def _build_config_payload(self) -> dict:
+        """Serialize the current convert settings for saved-task persistence."""
+        config = self._build_config()
+        return {
+            "output_codec": config.output_codec,
+            "output_resolution": config.output_resolution,
+            "crf_value": config.crf_value,
+            "preset": config.preset,
+            "use_hardware_accel": config.use_hardware_accel,
+            "hardware_encoder": config.hardware_encoder,
+            "output_dir": config.output_dir,
+            "skip_matching_output_enabled": self._source_codec_filter_check.isChecked(),
+        }
+
+    def _apply_config_payload(self, config_payload: dict) -> None:
+        """Apply saved Convert settings to the current controls."""
+        self._loading_settings = True
+        try:
+            self._set_selected_output_codec(
+                self._normalize_output_codec(
+                    str(config_payload.get("output_codec", "h264"))
+                )
+            )
+            self._set_selected_resolution(
+                self._normalize_resolution_value(config_payload.get("output_resolution"))
+            )
+            raw_crf = config_payload.get("crf_value")
+            try:
+                crf_parsed = int(raw_crf) if raw_crf is not None else DEFAULT_CRF
+            except (TypeError, ValueError):
+                crf_parsed = DEFAULT_CRF
+            crf_clamped = max(self._crf_slider.minimum(), min(self._crf_slider.maximum(), crf_parsed))
+            self._crf_slider.setValue(crf_clamped)
+            self._crf_label.setText(str(self._crf_slider.value()))
+
+            preset = str(config_payload.get("preset", DEFAULT_PRESET))
+            preset_index = self._preset_combo.findText(preset)
+            self._preset_combo.setCurrentIndex(preset_index if preset_index >= 0 else 0)
+
+            self._output_input.setText(str(config_payload.get("output_dir") or ""))
+
+            skip_matching = bool(config_payload.get("skip_matching_output_enabled", False))
+            self._source_codec_filter_check.setChecked(skip_matching)
+
+            hardware_encoder = config_payload.get("hardware_encoder")
+            use_hardware = bool(config_payload.get("use_hardware_accel"))
+            self._refresh_hardware_options(
+                preferred_name=str(hardware_encoder) if hardware_encoder else None,
+                prefer_none=not use_hardware,
+            )
+        finally:
+            self._loading_settings = False
+
     def _build_output_paths(
         self, input_paths: List[str], output_dir: Optional[str]
     ) -> Dict[str, str]:
@@ -1203,6 +1357,427 @@ class ConvertPage(QWidget):
             )
             for input_path in input_paths
         }
+
+    def _build_queue_output_path(self, input_path: str, source_root: Optional[str]) -> str:
+        """Build the output path for a queue item."""
+        output_dir = self._output_input.text().strip() or None
+        return build_conversion_output_path(
+            input_path,
+            output_dir=output_dir,
+            source_root=source_root,
+            output_codec=self._get_selected_output_codec(),
+        )
+
+    def _display_name_for_queue_item(
+        self, input_path: str, source_root: Optional[str]
+    ) -> str:
+        """Build the visible label for a queue item."""
+        file_path = Path(input_path)
+        if source_root:
+            try:
+                return file_path.relative_to(Path(source_root)).as_posix()
+            except ValueError:
+                pass
+        return file_path.name
+
+    def _replace_queue_item(
+        self,
+        item: ConvertQueueItem,
+        *,
+        item_id: Optional[str] = None,
+        status: Optional[ConvertQueueItemStatus] = None,
+        progress_percent: Optional[float] = None,
+        detail: Optional[str] = None,
+        error_message: Optional[str] = None,
+        output_path: Optional[str] = None,
+        display_name: Optional[str] = None,
+        source_root: Optional[str] = None,
+    ) -> ConvertQueueItem:
+        """Return a copy of a queue item with updated fields."""
+        return ConvertQueueItem(
+            item_id=item.item_id if item_id is None else item_id,
+            input_path=item.input_path,
+            output_path=item.output_path if output_path is None else output_path,
+            display_name=item.display_name if display_name is None else display_name,
+            source_root=item.source_root if source_root is None else source_root,
+            status=item.status if status is None else status,
+            progress_percent=(
+                item.progress_percent
+                if progress_percent is None
+                else progress_percent
+            ),
+            detail=item.detail if detail is None else detail,
+            error_message=(
+                item.error_message if error_message is None else error_message
+            ),
+        )
+
+    def _sync_queue_items(self) -> None:
+        """Sync durable queue items with the current file list and settings."""
+        entries = self._file_list.get_entries()
+        source_root_by_path = {
+            input_path: source_root for input_path, source_root in entries
+        }
+        self._restored_output_paths = {
+            input_path: output_path
+            for input_path, output_path in self._restored_output_paths.items()
+            if input_path in source_root_by_path
+        }
+        existing_by_path = {item.input_path: item for item in self._queue_items}
+
+        ordered_paths = [
+            item.input_path
+            for item in self._queue_items
+            if item.input_path in source_root_by_path
+        ]
+        for input_path, _source_root in entries:
+            if input_path not in ordered_paths:
+                ordered_paths.append(input_path)
+
+        updated_items: List[ConvertQueueItem] = []
+        for input_path in ordered_paths:
+            source_root = source_root_by_path[input_path]
+            existing_item = existing_by_path.get(input_path)
+            output_path = self._restored_output_paths.get(input_path)
+            if output_path is None:
+                output_path = self._build_queue_output_path(input_path, source_root)
+            display_name = self._display_name_for_queue_item(input_path, source_root)
+            if existing_item is None:
+                updated_items.append(
+                    ConvertQueueItem(
+                        item_id=input_path,
+                        input_path=input_path,
+                        output_path=output_path,
+                        display_name=display_name,
+                        source_root=source_root,
+                        detail="Pending",
+                    )
+                )
+                continue
+
+            updated_items.append(
+                self._replace_queue_item(
+                    existing_item,
+                    output_path=output_path,
+                    display_name=display_name,
+                    source_root=source_root,
+                )
+            )
+
+        self._queue_items = updated_items
+        self._refresh_queue_widget()
+
+    def _clear_auto_skipped_queue_items(self) -> None:
+        """Reset filter-generated skips while preserving explicit user skips."""
+        updated_items: List[ConvertQueueItem] = []
+        changed = False
+        for item in self._queue_items:
+            if (
+                item.status is ConvertQueueItemStatus.SKIPPED
+                and item.detail.startswith("Skipped (")
+            ):
+                updated_items.append(
+                    self._replace_queue_item(
+                        item,
+                        status=ConvertQueueItemStatus.PENDING,
+                        detail="Pending",
+                    )
+                )
+                changed = True
+                continue
+            updated_items.append(item)
+
+        if not changed:
+            return
+
+        self._queue_items = updated_items
+        self._refresh_queue_widget()
+
+    def _refresh_queue_widget(self) -> None:
+        """Render the durable queue item list."""
+        self._queue_widget.set_queue_items(self._queue_items)
+        self._queue_widget.setVisible(bool(self._queue_items))
+
+    def _has_startable_queue_items(self) -> bool:
+        """Return whether the queue has at least one item that can run now."""
+        return any(
+            item.status
+            in {
+                ConvertQueueItemStatus.PENDING,
+                ConvertQueueItemStatus.INCOMPLETE,
+                ConvertQueueItemStatus.PROCESSING,
+            }
+            for item in self._queue_items
+        )
+
+    def _mark_unstarted_queue_items_incomplete(
+        self, *, detail: str = "Cancelled before start"
+    ) -> None:
+        """Mark queued-but-never-started items as incomplete after interruption."""
+        updated_items: List[ConvertQueueItem] = []
+        changed = False
+        for item in self._queue_items:
+            if item.status is ConvertQueueItemStatus.PENDING:
+                updated_items.append(
+                    self._replace_queue_item(
+                        item,
+                        status=ConvertQueueItemStatus.INCOMPLETE,
+                        progress_percent=0.0,
+                        detail=detail,
+                        error_message="",
+                    )
+                )
+                changed = True
+                continue
+            updated_items.append(item)
+
+        if not changed:
+            return
+
+        self._queue_items = updated_items
+        self._refresh_queue_widget()
+
+    def _mark_active_queue_item_incomplete(self) -> None:
+        """Reset the active row so resume restarts it from the beginning."""
+        if self._active_queue_item_id is None:
+            return
+
+        self._update_queue_item(
+            self._active_queue_item_id,
+            status=ConvertQueueItemStatus.INCOMPLETE,
+            progress_percent=0.0,
+            detail="Restart from beginning",
+            error_message="",
+        )
+        self._active_queue_item_id = None
+
+    def _normalize_restored_queue_items(
+        self, items: List[ConvertQueueItem]
+    ) -> List[ConvertQueueItem]:
+        """Map restored rows onto resumable Convert states."""
+        normalized_items: List[ConvertQueueItem] = []
+        for item in items:
+            item = self._replace_queue_item(
+                item,
+                item_id=item.input_path,
+                display_name=item.display_name or self._display_name_for_queue_item(
+                    item.input_path, item.source_root
+                ),
+            )
+            if item.status is ConvertQueueItemStatus.PROCESSING:
+                normalized_items.append(
+                    self._replace_queue_item(
+                        item,
+                        status=ConvertQueueItemStatus.INCOMPLETE,
+                        progress_percent=0.0,
+                        detail="Restart from beginning",
+                        error_message="",
+                    )
+                )
+                continue
+            if item.status is ConvertQueueItemStatus.INCOMPLETE:
+                normalized_items.append(
+                    self._replace_queue_item(
+                        item,
+                        progress_percent=0.0,
+                        detail="Restart from beginning",
+                    )
+                )
+                continue
+            normalized_items.append(item)
+        return normalized_items
+
+    def _set_restored_file_entries(self, items: List[ConvertQueueItem]) -> None:
+        """Populate the source-file list from restored queue items."""
+        self._file_list._entries = [
+            (item.input_path, item.source_root) for item in items
+        ]
+        self._file_list._render_index = 0
+        self._file_list._render_timer.stop()
+        self._file_list._rebuild_list_widget()
+
+    def _prepare_queue_items_for_start(
+        self, queue_items: List[ConvertQueueItem]
+    ) -> List[ConvertQueueItem]:
+        """Return the subset that should run and refresh row states for this attempt."""
+        selected_output_format = self._codec_combo.currentText()
+        startable_items: List[ConvertQueueItem] = []
+        auto_skipped_count = 0
+        selected_item_ids = {queue_item.item_id for queue_item in queue_items}
+
+        for index, item in enumerate(self._queue_items):
+            if item.item_id not in selected_item_ids:
+                continue
+
+            if item.status in {
+                ConvertQueueItemStatus.SKIPPED,
+                ConvertQueueItemStatus.COMPLETED,
+                ConvertQueueItemStatus.FAILED,
+            }:
+                continue
+
+            matches_output = self._source_codec_filter_check.isChecked() and (
+                self._matches_selected_output_format(item.input_path)
+            )
+            if matches_output:
+                auto_skipped_count += 1
+                self._queue_items[index] = self._replace_queue_item(
+                    item,
+                    status=ConvertQueueItemStatus.SKIPPED,
+                    progress_percent=0.0,
+                    detail=f"Skipped ({selected_output_format})",
+                    error_message="",
+                )
+                continue
+
+            self._queue_items[index] = self._replace_queue_item(
+                item,
+                status=ConvertQueueItemStatus.PENDING,
+                progress_percent=0.0,
+                detail="Pending",
+                error_message="",
+            )
+            startable_items.append(self._queue_items[index])
+
+        self._refresh_queue_widget()
+
+        if self._source_codec_filter_check.isChecked():
+            if not startable_items:
+                QMessageBox.information(
+                    self,
+                    "Nothing To Convert",
+                    f'All selected files already match "{selected_output_format}".',
+                )
+                return []
+            if auto_skipped_count > 0:
+                QMessageBox.information(
+                    self,
+                    "Skipping Matching Files",
+                    f"Skipping {auto_skipped_count} file(s) that already match {selected_output_format}.",
+                )
+        elif not startable_items:
+            return []
+
+        return startable_items
+
+    def _start_conversion_for_queue_items(
+        self, queue_items: List[ConvertQueueItem]
+    ) -> None:
+        """Start conversion using the supplied queue subset and saved output paths."""
+        if not queue_items:
+            return
+
+        self._cancel_requested_during_run = False
+        self._pause_requested_during_run = False
+        self._active_queue_item_id = None
+
+        config = self._build_config()
+        files_to_convert = [item.input_path for item in queue_items]
+        output_paths = {item.input_path: item.output_path for item in queue_items}
+
+        self._conversion_manager = ConversionManager()
+        self._conversion_manager.set_config(config)
+        self._conversion_manager.job_started.connect(self._on_job_started)
+        self._conversion_manager.job_progress.connect(self._on_job_progress)
+        self._conversion_manager.job_completed.connect(self._on_job_completed)
+        self._conversion_manager.queue_progress.connect(self._on_queue_progress)
+        self._conversion_manager.all_completed.connect(self._on_all_completed)
+        self._conversion_manager.job_creation_progress.connect(
+            self._on_job_creation_progress
+        )
+        self._conversion_manager.jobs_created.connect(self._on_jobs_created)
+        self._conversion_manager.files_deleted.connect(self._on_files_deleted)
+
+        self._set_run_controls_locked(True)
+        self._start_btn.setEnabled(False)
+        self._cancel_btn.setVisible(True)
+
+        self._overall_progress.setMaximum(len(files_to_convert))
+        self._overall_progress.setValue(0)
+        self._overall_progress.setVisible(True)
+
+        self.start_requested.emit()
+        self._conversion_manager.add_files_async(
+            files_to_convert,
+            config.output_dir,
+            output_paths=output_paths,
+        )
+
+    def _find_queue_item_by_path(self, input_path: str) -> Optional[ConvertQueueItem]:
+        """Find a queue item by source path."""
+        for item in self._queue_items:
+            if item.input_path == input_path:
+                return item
+        return None
+
+    def _find_queue_index(self, item_id: str) -> int:
+        """Find the index of a queue item by item id."""
+        for index, item in enumerate(self._queue_items):
+            if item.item_id == item_id:
+                return index
+        return -1
+
+    def _update_queue_item(self, item_id: str, **changes) -> None:
+        """Apply updates to a queue item and refresh the widget."""
+        index = self._find_queue_index(item_id)
+        if index < 0:
+            return
+        self._queue_items[index] = self._replace_queue_item(
+            self._queue_items[index], **changes
+        )
+        self._refresh_queue_widget()
+
+    def _on_queue_reorder_requested(self, source_index: int, target_index: int) -> None:
+        """Move a queue item to a new position."""
+        if source_index == target_index:
+            return
+        if source_index < 0 or target_index < 0:
+            return
+        if source_index >= len(self._queue_items) or target_index >= len(self._queue_items):
+            return
+
+        item = self._queue_items.pop(source_index)
+        self._queue_items.insert(target_index, item)
+        self._refresh_queue_widget()
+
+    def _on_queue_skip_requested(self, item_id: str) -> None:
+        """Toggle whether a queue item is skipped."""
+        index = self._find_queue_index(item_id)
+        if index < 0:
+            return
+
+        item = self._queue_items[index]
+        if item.status is ConvertQueueItemStatus.PROCESSING:
+            return
+
+        if item.status is ConvertQueueItemStatus.SKIPPED:
+            self._queue_items[index] = self._replace_queue_item(
+                item,
+                status=ConvertQueueItemStatus.PENDING,
+                progress_percent=0.0,
+                detail="Pending",
+                error_message="",
+            )
+        else:
+            self._queue_items[index] = self._replace_queue_item(
+                item,
+                status=ConvertQueueItemStatus.SKIPPED,
+                progress_percent=0.0,
+                detail="Skipped",
+                error_message="",
+            )
+
+        self._refresh_queue_widget()
+        self._update_start_button_state()
+
+    def _on_queue_prioritize_requested(self, item_id: str) -> None:
+        """Move the selected queue item to the front."""
+        index = self._find_queue_index(item_id)
+        if index <= 0:
+            return
+        item = self._queue_items.pop(index)
+        self._queue_items.insert(0, item)
+        self._refresh_queue_widget()
 
     def _update_preview(self) -> None:
         """Refresh the Convert preview tree."""
@@ -1231,6 +1806,7 @@ class ConvertPage(QWidget):
         """Enable the start button only when the queue is fully prepared."""
         can_start = (
             self._file_list.count() > 0
+            and self._has_startable_queue_items()
             and not self._file_list.is_busy()
             and self._preflight_worker is None
             and not self._cancel_btn.isVisible()
@@ -1259,6 +1835,20 @@ class ConvertPage(QWidget):
             self._preflight_status_label.setText(
                 f"Analyzing {file_count} file(s) with ffprobe..."
             )
+            return
+
+        has_startable = self._has_startable_queue_items()
+        has_skipped = any(
+            item.status == ConvertQueueItemStatus.SKIPPED
+            for item in self._queue_items
+        )
+        if has_skipped and not has_startable:
+            self._preflight_status_label.setText(
+                "All queued files are skipped. Unskip at least one file to start."
+            )
+            return
+        if not has_startable:
+            self._preflight_status_label.setText("")
             return
 
         if not self._source_codec_filter_check.isChecked():
@@ -1290,10 +1880,12 @@ class ConvertPage(QWidget):
         self._crf_slider.setEnabled(enabled)
         self._preset_combo.setEnabled(enabled)
         if enabled:
+            self._queue_widget.set_actions_enabled(True)
             self._hw_combo.setEnabled(self._hw_combo.count() > 1)
             self._source_codec_filter_check.setEnabled(True)
             self._update_start_button_state()
         else:
+            self._queue_widget.set_actions_enabled(False)
             self._hw_combo.setEnabled(False)
             self._source_codec_filter_check.setEnabled(False)
             self._start_btn.setEnabled(False)

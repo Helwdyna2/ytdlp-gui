@@ -17,3 +17,19 @@
 - File-list folder scans now emit their loading-state transition as soon as the scan starts, so queue readiness updates immediately instead of waiting for completion/error.
 - Skip-matching readiness now refreshes when the checkbox or selected output resolution changes, and the match check now includes selected video resolution for `h264`/`hevc`/`vp9`.
 - Added focused Convert-page tests covering the folder-scan busy transition and the skip-status/regression path for resized outputs.
+- Wrote the Saved Tasks design spec in `docs/superpowers/specs/2026-04-01-saved-tasks-design.md` covering unified task persistence, Convert-first queue recovery, immediate pause behavior, and phased adapter rollout for other tools.
+- Chose a shared Saved Tasks shell with per-tool adapters rather than a universal runtime engine, so Convert can ship first without rewriting Trim and Download internals.
+- Wrote the implementation plan in `docs/superpowers/plans/2026-04-01-saved-tasks-convert-v1.md`, scoping the first delivery to shared Saved Tasks infrastructure plus Convert pause/resume, queue editing, startup restore, and processed-file detection.
+
+## 2026-04-05
+
+- Finished the Saved Tasks Convert v1 rollout on a single branch: shared saved-task persistence/service wiring, durable Convert queue state, pause/put-aside payload building, restore/resume behavior, and Saved Tasks menu/startup recovery surfaces.
+- Convert now stores queue rows as `ConvertQueueItem` state, supports reorder/skip/prioritize controls, pauses by marking the active item incomplete for restart-from-beginning semantics, and resumes only pending/incomplete rows while preserving saved output paths.
+- Added a Saved Tasks dialog plus startup prompt wiring in `MainWindow`; startup prompting is intentionally limited to task types with a real restore path, which is currently `convert` only.
+- Fixed two cancellation edge cases discovered during review: cancelling after queue edits no longer leaves the page in dead-end states, and cancelling during async job creation now emits a terminal manager path instead of wedging the Convert page UI.
+- Added focused regression coverage for saved-task repository/service behavior, convert saved-task helpers, convert queue/pause/restore flows, conversion-manager cancellation, and MainWindow saved-task recovery surfaces.
+- Verified the feature slice with `QT_QPA_PLATFORM=offscreen PYTHONPATH=. .venv/bin/pytest tests/test_saved_task_repository.py tests/test_convert_saved_task.py tests/test_convert_page.py tests/test_conversion_manager.py tests/test_main_window_workbench.py -q` (`58 passed`) and a clean `py_compile` pass across the touched modules.
+- Launched the desktop app successfully for a smoke start-up check; deeper interactive GUI validation of the restore flow was not automated from this session.
+- Added a manual Saved Tasks dialog in `src/ui/widgets/saved_tasks_dialog.py` with restore, open-tool, and delete actions for unfinished tasks.
+- Wired a `Saved Tasks...` File-menu action in `MainWindow` and added a restore entry point that routes saved Convert payloads into `ConvertPage.restore_saved_task(...)` while leaving other tools on the generic shell-open path only.
+- Added focused workbench coverage for the File-menu action, direct saved Convert restore routing, and dialog-triggered restore flow.
