@@ -820,6 +820,10 @@ class MainWindow(QMainWindow):
             "This saved task type cannot be restored yet.",
         )
 
+    def _can_restore_saved_task(self, saved_task: SavedTask) -> bool:
+        """Return whether the saved task has a real restore implementation."""
+        return saved_task.task_type == "convert"
+
     def prompt_restore_latest_saved_task(self) -> None:
         """Offer to restore the newest unfinished saved task."""
         if self.saved_task_service is None:
@@ -827,6 +831,8 @@ class MainWindow(QMainWindow):
 
         latest_task = self.saved_task_service.get_latest_recoverable_task()
         if latest_task is None:
+            return
+        if not self._can_restore_saved_task(latest_task):
             return
 
         result = QMessageBox.question(

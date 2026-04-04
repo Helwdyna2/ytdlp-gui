@@ -163,6 +163,8 @@ def main():
         else:
             main_window.show()
 
+        main_window.prompt_restore_latest_saved_task()
+
         # Run application
         logger.info("Application started")
         exit_code = app.exec()

@@ -10,7 +10,14 @@ pytest.importorskip("PyQt6.QtWidgets")
 
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import QApplication, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QApplication,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from src.data.database import Database
 from src.data.models import OutputConfig, SavedTask, SavedTaskStatus
@@ -462,6 +469,71 @@ def test_saved_tasks_menu_action_opens_dialog_and_restores_selection(qapp, monke
             "saved_task_id": 7,
         }
     ]
+
+    win.close()
+    qapp.processEvents()
+
+
+def test_startup_prompt_restores_latest_saved_task(qapp, monkeypatch):
+    latest_task = SavedTask(
+        id=9,
+        task_type="convert",
+        title="Latest convert",
+        status=SavedTaskStatus.PAUSED,
+        payload={
+            "config": {"output_codec": "h264"},
+            "items": [{"input_path": "/tmp/latest.mp4"}],
+        },
+    )
+
+    saved_task_service = MagicMock()
+    saved_task_service.get_latest_recoverable_task.return_value = latest_task
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *args, **kwargs: QMessageBox.StandardButton.Yes),
+    )
+
+    win = _make_window(monkeypatch, saved_task_service=saved_task_service)
+    win.prompt_restore_latest_saved_task()
+
+    assert win.shell.active_tool() == "convert"
+    assert win.convert_page.restore_calls == [
+        {
+            "payload": latest_task.payload,
+            "config_payload": {"output_codec": "h264"},
+            "saved_task_id": 9,
+        }
+    ]
+
+    win.close()
+    qapp.processEvents()
+
+
+def test_startup_prompt_ignores_unrestorable_task_types(qapp, monkeypatch):
+    latest_task = SavedTask(
+        id=10,
+        task_type="trim",
+        title="Trim draft",
+        status=SavedTaskStatus.PAUSED,
+        payload={"project_path": "/tmp/test.cutproj.json"},
+    )
+
+    saved_task_service = MagicMock()
+    saved_task_service.get_latest_recoverable_task.return_value = latest_task
+    question_calls = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        staticmethod(lambda *args, **kwargs: question_calls.append(True)),
+    )
+
+    win = _make_window(monkeypatch, saved_task_service=saved_task_service)
+    win.prompt_restore_latest_saved_task()
+
+    assert question_calls == []
+    assert win.shell.active_tool() == "add_urls"
+    assert win.convert_page.restore_calls == []
 
     win.close()
     qapp.processEvents()
