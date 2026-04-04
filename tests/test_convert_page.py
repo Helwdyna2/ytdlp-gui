@@ -1002,3 +1002,51 @@ def test_convert_page_restore_resumes_only_unfinished_items_in_queue_order(
         "/tmp/retry.mp4": "/tmp/out/retry.mp4",
         "/tmp/pending.mp4": "/tmp/out/pending.mp4",
     }
+
+
+def test_convert_page_restore_does_not_resume_failed_rows(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_conversion_manager,
+    convert_page_module,
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+
+    page = ConvertPage()
+    page.restore_saved_task(
+        payload={
+            "items": [
+                {
+                    "item_id": "failed",
+                    "input_path": "/tmp/failed.mp4",
+                    "output_path": "/tmp/out/failed.mp4",
+                    "display_name": "failed.mp4",
+                    "status": "failed",
+                    "detail": "Encoder error",
+                    "error_message": "Encoder error",
+                },
+                {
+                    "item_id": "retry",
+                    "input_path": "/tmp/retry.mp4",
+                    "output_path": "/tmp/out/retry.mp4",
+                    "display_name": "retry.mp4",
+                    "status": "incomplete",
+                    "detail": "Cancelled",
+                },
+            ]
+        },
+        config_payload={
+            "output_codec": "h264",
+            "output_dir": "/tmp/out",
+        },
+    )
+    qapp.processEvents()
+
+    page._on_start()
+
+    manager = fake_conversion_manager.instances[-1]
+    assert manager.added_files == ["/tmp/retry.mp4"]

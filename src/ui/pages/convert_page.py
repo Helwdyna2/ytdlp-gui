@@ -1455,7 +1455,6 @@ class ConvertPage(QWidget):
             in {
                 ConvertQueueItemStatus.PENDING,
                 ConvertQueueItemStatus.INCOMPLETE,
-                ConvertQueueItemStatus.FAILED,
                 ConvertQueueItemStatus.PROCESSING,
             }
             for item in self._queue_items
@@ -1563,6 +1562,7 @@ class ConvertPage(QWidget):
             if item.status in {
                 ConvertQueueItemStatus.SKIPPED,
                 ConvertQueueItemStatus.COMPLETED,
+                ConvertQueueItemStatus.FAILED,
             }:
                 continue
 
