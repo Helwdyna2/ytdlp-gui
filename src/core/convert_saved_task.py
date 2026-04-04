@@ -117,7 +117,12 @@ def build_convert_task_payload(
 def load_convert_task_payload(payload: dict[str, Any]) -> list[ConvertQueueItem]:
     """Restore saved Convert queue items from a persisted payload."""
     items: list[ConvertQueueItem] = []
-    for raw_item in payload.get("items", []):
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        raw_items = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
         items.append(ConvertQueueItem.from_payload(raw_item))
     return items
 

@@ -1,5 +1,6 @@
 """Main application window."""
 
+import inspect
 import logging
 from pathlib import Path
 from typing import Optional, List
@@ -800,13 +801,14 @@ class MainWindow(QMainWindow):
 
         if task_type == "convert":
             self.shell.switch_to_tool("convert")
-            try:
+            sig = inspect.signature(self.convert_page.restore_saved_task)
+            if "saved_task_id" in sig.parameters:
                 self.convert_page.restore_saved_task(
                     payload,
                     config_payload,
                     saved_task_id=saved_task_id,
                 )
-            except TypeError:
+            else:
                 self.convert_page.restore_saved_task(payload, config_payload)
             return
 

@@ -176,8 +176,9 @@ def _migrate_to_v4(self) -> None:
             status TEXT NOT NULL DEFAULT 'paused',
             summary_json TEXT NOT NULL DEFAULT '{}',
             payload_json TEXT NOT NULL DEFAULT '{}',
-            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT,
             CONSTRAINT chk_saved_task_status
                 CHECK (status IN ('active', 'paused', 'completed', 'failed', 'deleted'))
         )
@@ -254,13 +255,14 @@ class SavedTaskRepository:
         return [SavedTask.from_row(row) for row in rows]
 
     def mark_deleted(self, task_id: int) -> bool:
+        now = datetime.now().isoformat()
         cursor = self._db.execute(
             """
             UPDATE saved_tasks
-            SET status = 'deleted', updated_at = CURRENT_TIMESTAMP
+            SET status = 'deleted', deleted_at = ?, updated_at = ?
             WHERE id = ?
             """,
-            (task_id,),
+            (now, now, task_id),
         )
         return cursor.rowcount > 0
 ```
@@ -358,7 +360,7 @@ def __init__(
     self.saved_task_service = saved_task_service
 ```
 
-- [ ] **Step 4: Run the service and workbench tests again**
+- [ ] **Step 4: Run the service tests**
 
 Run: `PYTHONPATH=. .venv/bin/pytest tests/test_saved_task_repository.py -q`
 Expected: PASS for the new service assertions
@@ -543,27 +545,26 @@ def test_convert_page_prioritize_selected_item_moves_it_first(qapp, fake_config_
     from src.ui.pages.convert_page import ConvertPage
 
     page = ConvertPage()
-    page._queue_widget.set_items(
-        [
-            ConvertQueueItem(
-                item_id="one",
-                input_path="/tmp/1.mp4",
-                output_path="/tmp/out/1.mp4",
-                display_name="1.mp4",
-            ),
-            ConvertQueueItem(
-                item_id="two",
-                input_path="/tmp/2.mp4",
-                output_path="/tmp/out/2.mp4",
-                display_name="2.mp4",
-            ),
-        ]
-    )
+    page._queue_items = [
+        ConvertQueueItem(
+            item_id="one",
+            input_path="/tmp/1.mp4",
+            output_path="/tmp/out/1.mp4",
+            display_name="1.mp4",
+        ),
+        ConvertQueueItem(
+            item_id="two",
+            input_path="/tmp/2.mp4",
+            output_path="/tmp/out/2.mp4",
+            display_name="2.mp4",
+        ),
+    ]
+    page._refresh_queue_widget()
 
     page._queue_widget.select_item("two")
     page._queue_widget.prioritize_selected()
 
-    assert [item.item_id for item in page._queue_widget.items()] == ["two", "one"]
+    assert [item.item_id for item in page._queue_items] == ["two", "one"]
 ```
 
 - [ ] **Step 2: Run the Convert page tests to verify they fail**
@@ -708,16 +709,7 @@ Expected: FAIL because pause/put-aside and resume are not implemented
 
 - [ ] **Step 3: Implement persistence-aware pause/resume flow**
 
-```python
-def pause_all(self) -> None:
-    with QMutexLocker(self._mutex):
-        for worker in list(self._active_workers.values()):
-            worker.cancel()
-        for job in self._pending_jobs:
-            if job.status == ConversionStatus.PENDING:
-                job.status = ConversionStatus.CANCELLED
-                self._repository.update(job)
-```
+The ConversionManager already has a `cancel_all()` method that cancels all pending and active conversions. The ConvertPage uses this when pausing:
 
 ```python
 def _on_pause_put_aside(self) -> None:

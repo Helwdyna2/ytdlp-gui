@@ -161,22 +161,48 @@ class SavedTask:
     @classmethod
     def from_row(cls, row) -> "SavedTask":
         """Create SavedTask from database row."""
+        try:
+            status = SavedTaskStatus(row["status"])
+        except (ValueError, TypeError):
+            status = SavedTaskStatus.ACTIVE
+
+        try:
+            created_at = (
+                datetime.fromisoformat(row["created_at"])
+                if row["created_at"]
+                else datetime.now()
+            )
+        except (ValueError, TypeError):
+            created_at = datetime.now()
+
+        try:
+            updated_at = (
+                datetime.fromisoformat(row["updated_at"])
+                if row["updated_at"]
+                else datetime.now()
+            )
+        except (ValueError, TypeError):
+            updated_at = datetime.now()
+
+        try:
+            deleted_at = (
+                datetime.fromisoformat(row["deleted_at"])
+                if row["deleted_at"]
+                else None
+            )
+        except (ValueError, TypeError):
+            deleted_at = None
+
         return cls(
             id=row["id"],
             task_type=row["task_type"],
             title=row["title"],
-            status=SavedTaskStatus(row["status"]),
+            status=status,
             payload=cls._parse_json_object(row["payload_json"]),
             summary=cls._parse_json_object(row["summary_json"]),
-            created_at=datetime.fromisoformat(row["created_at"])
-            if row["created_at"]
-            else datetime.now(),
-            updated_at=datetime.fromisoformat(row["updated_at"])
-            if row["updated_at"]
-            else datetime.now(),
-            deleted_at=datetime.fromisoformat(row["deleted_at"])
-            if row["deleted_at"]
-            else None,
+            created_at=created_at,
+            updated_at=updated_at,
+            deleted_at=deleted_at,
         )
 
 

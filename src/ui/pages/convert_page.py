@@ -578,6 +578,7 @@ class ConvertPage(QWidget):
         self._source_codec_filter_check.toggled.connect(
             self._on_skip_matching_output_toggled
         )
+        self._output_input.textChanged.connect(self._on_output_dir_changed)
         self._output_input.textChanged.connect(self._on_settings_changed)
         self._output_input.textChanged.connect(self._sync_queue_items)
         self._output_input.textChanged.connect(self._update_preview)
@@ -671,6 +672,7 @@ class ConvertPage(QWidget):
     def _on_output_codec_changed(self) -> None:
         """Refresh dependent controls when the output codec changes."""
         self._clear_auto_skipped_queue_items()
+        self._restored_output_paths = {}
         preferred_hardware = self._hw_combo.currentData()
         self._refresh_hardware_options(
             preferred_name=preferred_hardware, prefer_none=preferred_hardware is None
@@ -683,6 +685,9 @@ class ConvertPage(QWidget):
     def _on_resolution_changed(self) -> None:
         """Refresh queue readiness when the output resolution changes."""
         self._clear_auto_skipped_queue_items()
+        self._restored_output_paths = {}
+        self._sync_queue_items()
+        self._update_preview()
         self._on_settings_changed()
         self._update_start_button_state()
 
@@ -691,6 +696,10 @@ class ConvertPage(QWidget):
         self._clear_auto_skipped_queue_items()
         self._on_settings_changed()
         self._update_start_button_state()
+
+    def _on_output_dir_changed(self) -> None:
+        """Clear restored output paths when output directory changes."""
+        self._restored_output_paths = {}
 
     def _on_settings_changed(self) -> None:
         """Save settings on any change."""
@@ -774,6 +783,7 @@ class ConvertPage(QWidget):
         self,
         payload: dict,
         config_payload: Optional[dict] = None,
+        saved_task_id: Optional[int] = None,
     ) -> None:
         """Restore queue state and settings from a saved Convert task."""
         self._cancel_preflight_scan()
@@ -1261,6 +1271,7 @@ class ConvertPage(QWidget):
             "use_hardware_accel": config.use_hardware_accel,
             "hardware_encoder": config.hardware_encoder,
             "output_dir": config.output_dir,
+            "skip_matching_output_enabled": self._source_codec_filter_check.isChecked(),
         }
 
     def _apply_config_payload(self, config_payload: dict) -> None:
@@ -1283,6 +1294,9 @@ class ConvertPage(QWidget):
             self._preset_combo.setCurrentIndex(preset_index if preset_index >= 0 else 0)
 
             self._output_input.setText(str(config_payload.get("output_dir") or ""))
+
+            skip_matching = bool(config_payload.get("skip_matching_output_enabled", False))
+            self._source_codec_filter_check.setChecked(skip_matching)
 
             hardware_encoder = config_payload.get("hardware_encoder")
             use_hardware = bool(config_payload.get("use_hardware_accel"))
