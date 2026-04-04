@@ -1286,7 +1286,13 @@ class ConvertPage(QWidget):
             self._set_selected_resolution(
                 self._normalize_resolution_value(config_payload.get("output_resolution"))
             )
-            self._crf_slider.setValue(int(config_payload.get("crf_value", DEFAULT_CRF)))
+            raw_crf = config_payload.get("crf_value")
+            try:
+                crf_parsed = int(raw_crf) if raw_crf is not None else DEFAULT_CRF
+            except (TypeError, ValueError):
+                crf_parsed = DEFAULT_CRF
+            crf_clamped = max(self._crf_slider.minimum(), min(self._crf_slider.maximum(), crf_parsed))
+            self._crf_slider.setValue(crf_clamped)
             self._crf_label.setText(str(self._crf_slider.value()))
 
             preset = str(config_payload.get("preset", DEFAULT_PRESET))
