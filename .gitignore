@@ -46,3 +46,4 @@ ytdlp_gui.egg-info
 *.mkv
 *.mp4
 trim_quick_session.json
+*.part
