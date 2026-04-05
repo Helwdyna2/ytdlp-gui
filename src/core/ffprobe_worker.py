@@ -304,6 +304,12 @@ class FFprobeWorker(QThread):
             else:
                 fps = float(fps_str)
 
+        audio_codec = ""
+        for stream in data.get("streams", []):
+            if stream.get("codec_type") == "audio":
+                audio_codec = stream.get("codec_name", "")
+                break
+
         # Extract codec
         codec = video_stream.get("codec_name", "unknown")
 
@@ -341,6 +347,7 @@ class FFprobeWorker(QThread):
             height=height,
             fps=fps,
             codec=codec,
+            audio_codec=audio_codec,
             bitrate=bitrate,
             duration=duration,
             file_size=file_size,

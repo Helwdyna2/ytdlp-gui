@@ -33,7 +33,7 @@ VIDEO_FILE_FILTER = (
 )
 
 # Database
-DB_VERSION = 4  # Incremented for saved_tasks table
+DB_VERSION = 5  # Incremented to add source_codec and ffmpeg_command to conversion_jobs
 
 # Conversion defaults
 DEFAULT_CRF = 23

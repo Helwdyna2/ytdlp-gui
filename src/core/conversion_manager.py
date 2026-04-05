@@ -42,6 +42,7 @@ class ConversionManager(QObject):
     jobs_created = pyqtSignal(list)  # List[ConversionJob]
     log = pyqtSignal(str, str)  # level, message
     files_deleted = pyqtSignal(int, list)  # count, paths
+    job_command_built = pyqtSignal(int, str, str)  # job_id, input_path, command
 
     def __init__(self, repository: Optional[ConversionRepository] = None, parent=None):
         """
@@ -102,6 +103,7 @@ class ConversionManager(QObject):
         input_paths: List[str],
         output_dir: Optional[str] = None,
         output_paths: Optional[Dict[str, str]] = None,
+        source_codecs: Optional[Dict[str, str]] = None,
     ) -> List[ConversionJob]:
         """
         Add files to the conversion queue.
@@ -126,6 +128,7 @@ class ConversionManager(QObject):
                 input_path,
                 output_directory,
                 output_path=output_paths.get(input_path) if output_paths else None,
+                source_codec=source_codecs.get(input_path) if source_codecs else None,
             )
             jobs.append(job)
 
@@ -140,6 +143,7 @@ class ConversionManager(QObject):
         input_paths: List[str],
         output_dir: Optional[str] = None,
         output_paths: Optional[Dict[str, str]] = None,
+        source_codecs: Optional[Dict[str, str]] = None,
     ) -> None:
         """
         Add files to the conversion queue asynchronously (non-blocking).
@@ -166,6 +170,7 @@ class ConversionManager(QObject):
             input_paths=input_paths,
             output_dir=output_directory,
             output_paths=output_paths,
+            source_codecs=source_codecs,
             config=self._config,
             repository=self._repository,
             parent=self,
@@ -237,6 +242,7 @@ class ConversionManager(QObject):
         input_path: str,
         output_dir: str,
         output_path: Optional[str] = None,
+        source_codec: Optional[str] = None,
     ) -> ConversionJob:
         """
         Create a conversion job.
@@ -256,6 +262,7 @@ class ConversionManager(QObject):
             input_path,
             output_dir=output_dir,
             output_codec=config.output_codec,
+            source_codec=source_codec,
         )
 
         # Get input file size
@@ -272,6 +279,7 @@ class ConversionManager(QObject):
             if config.use_hardware_accel
             else None,
             input_size=input_size,
+            source_codec=source_codec,
         )
 
         # Persist to database
@@ -355,7 +363,10 @@ class ConversionManager(QObject):
 
         # Create worker
         worker = FFmpegWorker(
-            input_path=job.input_path, output_path=job.output_path, config=config
+            input_path=job.input_path,
+            output_path=job.output_path,
+            config=config,
+            source_codec=job.source_codec,
         )
 
         # Connect signals - job.id is guaranteed to be set after create()
@@ -370,6 +381,11 @@ class ConversionManager(QObject):
         worker.completed.connect(
             lambda success, path, err, jid=job_id: self._on_completed(
                 jid, success, path, err
+            )
+        )
+        worker.command_built.connect(
+            lambda command, jid=job_id, input_path=job.input_path: self._on_command_built(
+                jid, input_path, command
             )
         )
         worker.log.connect(self.log.emit)
@@ -390,6 +406,11 @@ class ConversionManager(QObject):
         # Start the worker
         worker.start()
         logger.info(f"Started conversion job {job_id}")
+
+    def _on_command_built(self, job_id: int, input_path: str, command: str) -> None:
+        """Forward the exact FFmpeg command for a running job and persist it."""
+        self._repository.update_ffmpeg_command(job_id, command)
+        self.job_command_built.emit(job_id, input_path, command)
 
     def _on_progress(self, job_id: int, percent: float, speed: str, eta: str) -> None:
         """Handle progress update from worker."""

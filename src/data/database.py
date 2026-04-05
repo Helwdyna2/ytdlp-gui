@@ -245,6 +245,10 @@ class Database:
             if current < 4:
                 self._migrate_to_v4()
 
+            # Migration 5: Add source_codec and ffmpeg_command to conversion_jobs
+            if current < 5:
+                self._migrate_to_v5()
+
     def _migrate_to_v2(self) -> None:
         """Migration v2: Add updated_at column to downloads table."""
         logger.info("Running migration v2: Adding updated_at column to downloads table")
@@ -328,6 +332,24 @@ class Database:
             (4, "Add saved_tasks table")
         )
         logger.info("Migration v4 completed")
+
+    def _migrate_to_v5(self) -> None:
+        """Migration v5: Add source_codec and ffmpeg_command columns to conversion_jobs."""
+        logger.info("Running migration v5: Adding source_codec and ffmpeg_command to conversion_jobs")
+
+        columns = self.fetchall("PRAGMA table_info(conversion_jobs)")
+        column_names = [col['name'] for col in columns]
+
+        if 'source_codec' not in column_names:
+            self.execute("ALTER TABLE conversion_jobs ADD COLUMN source_codec TEXT")
+        if 'ffmpeg_command' not in column_names:
+            self.execute("ALTER TABLE conversion_jobs ADD COLUMN ffmpeg_command TEXT")
+
+        self.execute(
+            "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
+            (5, "Add source_codec and ffmpeg_command to conversion_jobs")
+        )
+        logger.info("Migration v5 completed")
 
     def _create_saved_tasks_schema(self) -> None:
         """Create the current saved_tasks schema and supporting indexes."""

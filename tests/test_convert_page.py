@@ -2,6 +2,7 @@
 
 import os
 import sys
+from typing import Iterable, List, Mapping, Optional
 
 import pytest
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -40,6 +41,8 @@ def fake_config_service(monkeypatch, convert_page_module):
             self.values = {
                 "convert.codec": "h264",
                 "convert.resolution": "source",
+                "convert.audio_mode": "copy",
+                "convert.frame_rate": "source",
                 "convert.crf": 23,
                 "convert.preset": "medium",
                 "convert.output_dir": "",
@@ -110,8 +113,10 @@ def fake_ffprobe_worker(monkeypatch, convert_page_module):
                     VideoMetadata(
                         file_path=path,
                         codec=metadata.get("codec", ""),
+                        audio_codec=metadata.get("audio_codec", ""),
                         width=metadata.get("width", 0),
                         height=metadata.get("height", 0),
+                        fps=metadata.get("fps", 0.0),
                     )
                 )
             self.completed.emit(results)
@@ -159,11 +164,13 @@ def fake_conversion_manager(monkeypatch, convert_page_module):
         job_started = pyqtSignal(int)
         job_progress = pyqtSignal(int, float, str, str)
         job_completed = pyqtSignal(int, bool, str, str)
+        job_command_built = pyqtSignal(int, str, str)
         queue_progress = pyqtSignal(int, int, int)
         all_completed = pyqtSignal()
         job_creation_progress = pyqtSignal(int, int)
         jobs_created = pyqtSignal(list)
         files_deleted = pyqtSignal(int, list)
+        log = pyqtSignal(str, str)
 
         instances = []
 
@@ -173,6 +180,7 @@ def fake_conversion_manager(monkeypatch, convert_page_module):
             self.added_files = None
             self.added_output_dir = None
             self.added_output_paths = None
+            self.added_source_codecs = None
             self.started = False
             self.cancelled = False
             self.completed_count = 0
@@ -182,10 +190,21 @@ def fake_conversion_manager(monkeypatch, convert_page_module):
         def set_config(self, config):
             self.config = config
 
-        def add_files_async(self, files, output_dir, output_paths=None):
-            self.added_files = list(files)
+        def add_files_async(
+            self,
+            input_paths: Iterable[str],
+            output_dir: Optional[str],
+            output_paths: Optional[Mapping[str, str]] = None,
+            source_codecs: Optional[Mapping[str, str]] = None,
+        ) -> None:
+            self.added_files = list(input_paths)
             self.added_output_dir = output_dir
             self.added_output_paths = output_paths
+            self.added_source_codecs = source_codecs
+
+        def reset_counts(self) -> None:
+            self.completed_count = 0
+            self.failed_count = 0
 
         def start(self):
             self.started = True
@@ -253,6 +272,17 @@ def test_convert_page_quality_label_and_crf_tooltip(
     labels = [lbl for lbl in page.findChildren(QLabel) if lbl.text() == "Quality"]
     assert len(labels) >= 1, "Should have a 'Quality' label"
     assert "CRF" in page._crf_slider.toolTip()
+
+
+def test_convert_page_output_format_includes_same_as_source(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    page = ConvertPage()
+
+    assert page._codec_combo.itemText(0) == "Same as source"
+    assert page._codec_combo.itemData(0) == "source"
 
 
 def test_convert_page_progress_in_left_panel(
@@ -333,7 +363,7 @@ def test_convert_page_hw_combo_refreshes_per_output_codec(
     page = ConvertPage()
     assert _combo_items(page._hw_combo) == ["None", "VideoToolbox"]
 
-    page._codec_combo.setCurrentIndex(1)
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("hevc"))
     assert _combo_items(page._hw_combo) == ["None", "Intel Quick Sync"]
 
 
@@ -349,12 +379,26 @@ def test_convert_page_hw_combo_disabled_for_unsupported_target(
     )
 
     page = ConvertPage()
-    page._codec_combo.setCurrentIndex(2)
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("vp9"))
 
     assert _combo_items(page._hw_combo) == ["Not available for this format"]
     assert not page._hw_combo.isEnabled()
     assert page._source_codec_filter_check.isEnabled()
     assert "only available for H.264 and H.265" in page._hw_status_label.text()
+
+
+def test_convert_page_same_as_source_disables_skip_filter(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    page = ConvertPage()
+    page._source_codec_filter_check.setChecked(True)
+
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("source"))
+
+    assert page._source_codec_filter_check.isChecked() is False
+    assert page._source_codec_filter_check.isEnabled() is False
 
 
 def test_convert_page_hw_combo_explains_missing_hardware_detection(
@@ -499,7 +543,7 @@ def test_convert_page_skip_status_refreshes_for_toggle_and_resolution(
 
     assert "will be skipped" in page._preflight_status_label.text()
 
-    resolution_index = page._resolution_combo.findText("1280x720")
+    resolution_index = page._resolution_combo.findText("720p")
     page._resolution_combo.setCurrentIndex(resolution_index)
     qapp.processEvents()
 
@@ -629,9 +673,9 @@ def test_convert_page_resolution_defaults_to_horizontal_presets(
     page = ConvertPage()
 
     assert page._resolution_combo.itemText(0) == "Same as source"
-    assert page._resolution_combo.itemText(1) == "3840x2160"
-    assert page._resolution_combo.itemText(4) == "1280x720"
-    assert page._resolution_combo.itemText(6) == "2160x3840 (Vertical override)"
+    assert page._resolution_combo.itemText(1) == "2160p"
+    assert page._resolution_combo.itemText(4) == "720p"
+    assert page._resolution_combo.itemText(6) == "2160p (Vertical override)"
 
 
 def test_convert_page_resolution_switches_to_vertical_when_source_is_vertical(
@@ -647,9 +691,9 @@ def test_convert_page_resolution_switches_to_vertical_when_source_is_vertical(
     page._file_list._add_paths(["/tmp/clip.mp4"])
     qapp.processEvents()
 
-    assert page._resolution_combo.itemText(1) == "2160x3840"
-    assert page._resolution_combo.itemText(4) == "720x1280"
-    assert page._resolution_combo.itemText(6) == "3840x2160 (Horizontal override)"
+    assert page._resolution_combo.itemText(1) == "2160p"
+    assert page._resolution_combo.itemText(4) == "720p"
+    assert page._resolution_combo.itemText(6) == "2160p (Horizontal override)"
 
 
 def test_convert_page_build_config_uses_selected_output_resolution(
@@ -658,12 +702,171 @@ def test_convert_page_build_config_uses_selected_output_resolution(
     from src.ui.pages.convert_page import ConvertPage
 
     page = ConvertPage()
-    index = page._resolution_combo.findText("1920x1080")
+    index = page._resolution_combo.findText("1080p")
     page._resolution_combo.setCurrentIndex(index)
 
     config = page._build_config()
 
-    assert config.output_resolution == "1920x1080"
+    assert config.output_resolution == "1080p"
+
+
+def test_convert_page_build_config_includes_audio_mode_and_frame_rate(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    page = ConvertPage()
+    page._audio_mode_combo.setCurrentIndex(page._audio_mode_combo.findData("none"))
+    page._frame_rate_combo.setCurrentIndex(page._frame_rate_combo.findData("29.97"))
+
+    config = page._build_config()
+
+    assert config.audio_mode == "none"
+    assert config.frame_rate == "29.97"
+
+
+def test_convert_page_blocks_incompatible_audio_copy_for_selected_container(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/clip.mp4": {
+            "codec": "h264",
+            "audio_codec": "aac",
+            "width": 1920,
+            "height": 1080,
+        },
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/clip.mp4"])
+    qapp.processEvents()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("vp9"))
+
+    assert page._start_btn.isEnabled() is False
+    assert "Copy audio is unavailable" in page._preflight_status_label.text()
+
+
+def test_convert_page_warns_when_audio_copy_is_incompatible_on_start(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_conversion_manager,
+    convert_page_module,
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    warnings = []
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+    monkeypatch.setattr(
+        convert_page_module.QMessageBox,
+        "warning",
+        lambda *args: warnings.append((args[1], args[2])),
+    )
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/clip.mp4": {
+            "codec": "h264",
+            "audio_codec": "aac",
+            "width": 1920,
+            "height": 1080,
+        },
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/clip.mp4"])
+    qapp.processEvents()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("vp9"))
+
+    page._on_start()
+
+    assert fake_conversion_manager.instances == []
+    assert warnings
+    assert warnings[0][0] == "Audio Copy Not Supported"
+
+
+def test_convert_page_blocks_incompatible_audio_copy_for_same_as_source_mp4(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    """Same-as-source with an MP4 source should reject a vorbis audio track."""
+    from src.ui.pages.convert_page import ConvertPage
+
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/clip.mp4": {
+            "codec": "h264",
+            "audio_codec": "vorbis",
+            "width": 1920,
+            "height": 1080,
+        },
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/clip.mp4"])
+    qapp.processEvents()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("source"))
+
+    assert page._start_btn.isEnabled() is False
+    assert "Copy audio is unavailable" in page._preflight_status_label.text()
+
+
+def test_convert_page_blocks_incompatible_audio_copy_for_same_as_source_webm(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    """Same-as-source with a WebM source should reject an aac audio track."""
+    from src.ui.pages.convert_page import ConvertPage
+
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/clip.webm": {
+            "codec": "vp9",
+            "audio_codec": "aac",
+            "width": 1920,
+            "height": 1080,
+        },
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/clip.webm"])
+    qapp.processEvents()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("source"))
+
+    assert page._start_btn.isEnabled() is False
+    assert "Copy audio is unavailable" in page._preflight_status_label.text()
+
+
+def test_convert_page_no_audio_allows_incompatible_source_audio(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_conversion_manager,
+    convert_page_module,
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/clip.mp4": {
+            "codec": "h264",
+            "audio_codec": "aac",
+            "width": 1920,
+            "height": 1080,
+        },
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/clip.mp4"])
+    qapp.processEvents()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("vp9"))
+    page._audio_mode_combo.setCurrentIndex(page._audio_mode_combo.findData("none"))
+
+    assert page._start_btn.isEnabled() is True
+
+    page._on_start()
+
+    manager = fake_conversion_manager.instances[-1]
+    assert manager.config.audio_mode == "none"
 
 
 def test_convert_page_shows_preview_tree_for_nested_folder_inputs(
@@ -756,6 +959,27 @@ def test_convert_page_preview_updates_output_extension(
     assert child_item.text(0).endswith("input_converted.webm")
 
 
+def test_convert_page_same_as_source_preview_preserves_input_extension(
+    qapp, fake_config_service, fake_ffprobe_worker
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/input.webm": "vp9",
+    }
+
+    page = ConvertPage()
+    page._file_list._add_paths(["/tmp/input.webm"])
+    qapp.processEvents()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("source"))
+
+    root_item = page._preview_tree.invisibleRootItem()
+    child_item = root_item.child(0) if root_item.childCount() else None
+
+    assert child_item is not None
+    assert child_item.text(0).endswith("input_converted.webm")
+
+
 def test_convert_page_queue_status_text_updates_for_completed_job(
     qapp,
     monkeypatch,
@@ -790,6 +1014,49 @@ def test_convert_page_queue_status_text_updates_for_completed_job(
 
     assert page._queue_widget.status_text_for("/tmp/a.mp4") == "Complete"
     assert page._queue_widget.is_item_completed("/tmp/a.mp4") is True
+
+
+def test_convert_page_same_as_source_passes_source_codecs_to_manager(
+    qapp,
+    monkeypatch,
+    fake_config_service,
+    fake_ffprobe_worker,
+    fake_conversion_manager,
+    convert_page_module,
+):
+    from src.ui.pages.convert_page import ConvertPage
+
+    monkeypatch.setattr(convert_page_module, "get_cached_hardware_encoders", lambda: [])
+    fake_ffprobe_worker.results_by_path = {
+        "/tmp/clip.webm": "vp9",
+    }
+
+    page = ConvertPage()
+    page._codec_combo.setCurrentIndex(page._codec_combo.findData("source"))
+    page._file_list._add_paths(["/tmp/clip.webm"])
+    qapp.processEvents()
+
+    page._on_start()
+
+    manager = fake_conversion_manager.instances[-1]
+    assert manager.added_source_codecs == {"/tmp/clip.webm": "vp9"}
+    assert manager.added_output_paths["/tmp/clip.webm"].endswith(
+        "clip_converted.webm"
+    )
+
+
+def test_convert_page_view_log_button_shows_dialog(
+    qtbot, fake_config_service, fake_ffprobe_worker
+):
+    from PyQt6.QtCore import Qt
+
+    from src.ui.pages.convert_page import ConvertPage
+
+    page = ConvertPage()
+
+    qtbot.mouseClick(page._view_log_btn, Qt.MouseButton.LeftButton)
+
+    assert page._process_log_dialog.isVisible() is True
 
 
 def test_convert_page_prioritize_moves_item_to_front_of_queue(

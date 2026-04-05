@@ -1,7 +1,9 @@
 """Worker for video conversion using FFmpeg."""
 
 import logging
+import os
 import re
+import shlex
 import subprocess
 import time
 from datetime import datetime
@@ -10,6 +12,10 @@ from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from ..core.conversion_paths import (
+    SAME_AS_SOURCE_CODEC,
+    resolve_conversion_output_codec,
+)
 from ..data.models import ConversionConfig, ConversionJob, ConversionStatus
 from ..utils.ffmpeg_utils import find_ffmpeg
 from ..utils.hardware_accel import get_encoder_for_codec, get_cached_hardware_encoders
@@ -33,9 +39,16 @@ class FFmpegWorker(QThread):
     )  # percent, speed, eta, current, total
     log = pyqtSignal(str, str)  # level, message
     completed = pyqtSignal(bool, str, str)  # success, output_path, error_message
+    command_built = pyqtSignal(str)  # formatted ffmpeg command
 
     def __init__(
-        self, input_path: str, output_path: str, config: ConversionConfig, parent=None
+        self,
+        input_path: str,
+        output_path: str,
+        config: ConversionConfig,
+        *,
+        source_codec: Optional[str] = None,
+        parent=None,
     ):
         """
         Initialize the FFmpeg worker.
@@ -50,6 +63,7 @@ class FFmpegWorker(QThread):
         self._input_path = input_path
         self._output_path = output_path
         self._config = config
+        self._source_codec = self._normalize_codec(source_codec)
         self._cancelled = False
         self._process: Optional[subprocess.Popen] = None
         self._duration: float = 0.0
@@ -78,8 +92,10 @@ class FFmpegWorker(QThread):
 
             # Build the FFmpeg command
             cmd = self._build_command(ffmpeg_path)
+            formatted_command = self._format_command(cmd)
             self.log.emit("info", f"Starting conversion: {Path(self._input_path).name}")
-            self.log.emit("debug", f"Command: {' '.join(cmd)}")
+            self.command_built.emit(formatted_command)
+            self.log.emit("debug", f"Command: {formatted_command}")
 
             # Start FFmpeg process with platform-specific settings
             self._process = subprocess.Popen(
@@ -132,6 +148,7 @@ class FFmpegWorker(QThread):
         Returns:
             Command as list of strings
         """
+        output_codec = self._effective_output_codec()
         cmd = [
             ffmpeg_path,
             "-y",  # Overwrite output
@@ -139,19 +156,23 @@ class FFmpegWorker(QThread):
             self._input_path,
         ]
 
-        if self._config.output_codec in {"mp3", "aac", "flac"}:
+        if output_codec in {"mp3", "aac", "flac"}:
             cmd.extend(["-vn"])
-            cmd.extend(self._build_audio_only_args())
+            cmd.extend(self._build_audio_only_args(output_codec))
         else:
-            encoder = self._resolve_video_encoder()
+            encoder = self._resolve_video_encoder(output_codec)
             cmd.extend(["-c:v", encoder])
 
-            scale_filter = self._build_scale_filter()
+            scale_filter = self._build_scale_filter(output_codec)
             if scale_filter:
                 cmd.extend(["-vf", scale_filter])
 
+            output_frame_rate = self._normalized_frame_rate()
+            if output_frame_rate:
+                cmd.extend(["-r", output_frame_rate])
+
             cmd.extend(self._build_video_quality_args(encoder))
-            cmd.extend(self._build_mux_audio_args())
+            cmd.extend(self._build_video_audio_args())
 
         # Progress reporting
         cmd.extend(["-progress", "pipe:1"])
@@ -161,9 +182,32 @@ class FFmpegWorker(QThread):
 
         return cmd
 
-    def _resolve_video_encoder(self) -> str:
+    def _normalize_codec(self, codec: Optional[str]) -> Optional[str]:
+        """Normalize codec aliases from config or ffprobe."""
+        normalized = (codec or "").strip().lower()
+        if normalized == "h265":
+            return "hevc"
+        return normalized or None
+
+    def _effective_output_codec(self) -> str:
+        """Resolve the effective output codec for the current job."""
+        resolved_codec = resolve_conversion_output_codec(
+            self._config.output_codec,
+            self._source_codec,
+        )
+        if resolved_codec:
+            return resolved_codec
+
+        if self._config.output_codec == SAME_AS_SOURCE_CODEC:
+            raise ValueError(
+                "Same as source is only available for H.264, H.265, VP9, MP3, AAC, and FLAC inputs."
+            )
+
+        raise ValueError(f"Unsupported output codec: {self._config.output_codec}")
+
+    def _resolve_video_encoder(self, output_codec: str) -> str:
         """Resolve the requested video encoder for the selected output format."""
-        if self._config.output_codec == "vp9":
+        if output_codec == "vp9":
             return "libvpx-vp9"
 
         hw_encoder = None
@@ -180,7 +224,7 @@ class FFmpegWorker(QThread):
                 hw_encoder = encoders[0]
 
         return get_encoder_for_codec(
-            hw_encoder, self._config.output_codec, self._config.use_hardware_accel
+            hw_encoder, output_codec, self._config.use_hardware_accel
         )
 
     def _build_video_quality_args(self, encoder: str) -> list[str]:
@@ -218,39 +262,52 @@ class FFmpegWorker(QThread):
 
         return ["-crf", str(self._config.crf_value), "-preset", self._config.preset]
 
-    def _build_mux_audio_args(self) -> list[str]:
+    def _build_video_audio_args(self) -> list[str]:
         """Build audio arguments for video container outputs."""
-        if self._config.output_codec == "vp9":
-            return ["-c:a", "libopus", "-b:a", "192k"]
-        return ["-c:a", "aac", "-b:a", "192k"]
+        if self._config.audio_mode == "none":
+            return ["-an"]
+        return ["-c:a", "copy"]
 
-    def _build_audio_only_args(self) -> list[str]:
+    def _build_audio_only_args(self, output_codec: str) -> list[str]:
         """Build audio codec arguments for audio-only outputs."""
-        if self._config.output_codec == "mp3":
+        if output_codec == "mp3":
             return ["-c:a", "libmp3lame", "-b:a", "192k"]
-        if self._config.output_codec == "flac":
+        if output_codec == "flac":
             return ["-c:a", "flac"]
         return ["-c:a", "aac", "-b:a", "192k"]
 
-    def _build_scale_filter(self) -> Optional[str]:
-        """Build a scale/pad filter for the selected output resolution."""
-        if self._config.output_codec not in {"h264", "hevc", "vp9"}:
+    def _build_scale_filter(self, output_codec: str) -> Optional[str]:
+        """Build an aspect-preserving scale filter for the selected output resolution."""
+        if output_codec not in {"h264", "hevc", "vp9"}:
             return None
 
         resolution = (self._config.output_resolution or "").strip().lower()
         if not resolution:
             return None
 
-        match = re.fullmatch(r"(\d+)x(\d+)", resolution)
+        match = re.fullmatch(r"(?:(horizontal|vertical):)?(\d{3,4})p", resolution)
         if not match:
             logger.warning("Ignoring invalid output resolution: %s", resolution)
             return None
 
-        width, height = match.groups()
+        orientation, target_height = match.groups()
+        if orientation == "horizontal":
+            return f"scale=-2:{target_height}"
+        if orientation == "vertical":
+            return f"scale={target_height}:-2"
+
         return (
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease:"
-            f"force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+            "scale="
+            f"'if(gte(iw,ih),-2,{target_height})':"
+            f"'if(gte(iw,ih),{target_height},-2)'"
         )
+
+    def _normalized_frame_rate(self) -> Optional[str]:
+        """Normalize the requested output frame rate."""
+        frame_rate = (self._config.frame_rate or "").strip().lower()
+        if not frame_rate or frame_rate == "source":
+            return None
+        return frame_rate
 
     def _nvenc_preset(self, preset: str) -> str:
         """Map standard preset to NVENC preset."""
@@ -373,3 +430,9 @@ class FFmpegWorker(QThread):
                 output_path.unlink()
         except Exception as e:
             logger.warning(f"Failed to cleanup output file: {e}")
+
+    def _format_command(self, cmd: list[str]) -> str:
+        """Render the FFmpeg argv list as a copyable shell command."""
+        if os.name == "nt":
+            return subprocess.list2cmdline(cmd)
+        return shlex.join(cmd)

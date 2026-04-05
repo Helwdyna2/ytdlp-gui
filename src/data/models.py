@@ -307,6 +307,7 @@ class VideoMetadata:
     height: int = 0
     fps: float = 0.0
     codec: str = ""
+    audio_codec: str = ""
     bitrate: int = 0
     duration: float = 0.0
     file_size: int = 0
@@ -394,7 +395,9 @@ class ConversionConfig:
     preset: str = "medium"  # ultrafast to veryslow
     use_hardware_accel: bool = False
     hardware_encoder: Optional[str] = None  # nvenc, amf, qsv
-    output_resolution: Optional[str] = None  # e.g. "1920x1080"
+    output_resolution: Optional[str] = None  # e.g. "1080p" or "vertical:1080p"
+    audio_mode: str = "copy"  # copy or none
+    frame_rate: Optional[str] = None  # e.g. "29.97"
     output_dir: Optional[str] = None
 
 
@@ -417,6 +420,8 @@ class ConversionJob:
     duration: float = 0.0
     created_at: datetime = field(default_factory=datetime.now)
     completed_at: Optional[datetime] = None
+    source_codec: Optional[str] = None
+    ffmpeg_command: Optional[str] = None
 
     @classmethod
     def from_row(cls, row) -> "ConversionJob":
@@ -441,6 +446,8 @@ class ConversionJob:
             completed_at=datetime.fromisoformat(row["completed_at"])
             if row["completed_at"]
             else None,
+            source_codec=row["source_codec"] if "source_codec" in row.keys() else None,
+            ffmpeg_command=row["ffmpeg_command"] if "ffmpeg_command" in row.keys() else None,
         )
 
 
