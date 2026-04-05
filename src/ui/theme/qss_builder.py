@@ -64,15 +64,16 @@ QStackedWidget {{
 /* ----- 2. QPushButton default (secondary / ghost style) ----- */
 QPushButton {{
     background: transparent;
-    border: 1px solid {t["ghost-border"]};
+    border: 1px solid transparent;
     color: {t["text-primary"]};
     border-radius: {t["r-l"]};
-    padding: 6px 16px;
+    padding: 6px {t["sp-l"]};
 }}
 
 QPushButton:hover {{
     background: {t["bg-hover"]};
     color: {t["text-bright"]};
+    border: 1px solid transparent;
 }}
 
 QPushButton:pressed {{
@@ -86,7 +87,7 @@ QPushButton#btnPrimary {{
     color: {t["text-on-cyan"]};
     border: none;
     border-radius: {t["r-l"]};
-    padding: 8px 24px;
+    padding: {t["sp-s"]} {t["sp-xl"]};
     font-weight: 700;
     font-size: 13px;
 }}
@@ -107,7 +108,7 @@ QPushButton#btnSecondary {{
     border: 1px solid {t["ghost-border"]};
     color: {t["text-primary"]};
     border-radius: {t["r-l"]};
-    padding: 6px 16px;
+    padding: 6px {t["sp-l"]};
 }}
 
 QPushButton#btnSecondary:hover {{
@@ -125,7 +126,7 @@ QPushButton#btnDestructive {{
     color: {t["error"]};
     border: 1px solid {t["ghost-border"]};
     border-radius: {t["r-l"]};
-    padding: 6px 16px;
+    padding: 6px {t["sp-l"]};
 }}
 
 QPushButton#btnDestructive:hover {{
@@ -140,7 +141,7 @@ QPushButton[button_role="primary"] {{
     color: {t["text-on-cyan"]};
     border: none;
     border-radius: {t["r-l"]};
-    padding: 8px 24px;
+    padding: {t["sp-s"]} {t["sp-xl"]};
     font-weight: 700;
     font-size: 13px;
 }}
@@ -160,7 +161,7 @@ QPushButton[button_role="secondary"] {{
     border: 1px solid {t["ghost-border"]};
     color: {t["text-primary"]};
     border-radius: {t["r-l"]};
-    padding: 6px 16px;
+    padding: 6px {t["sp-l"]};
 }}
 
 QPushButton[button_role="secondary"]:hover {{
@@ -177,7 +178,7 @@ QPushButton[button_role="destructive"] {{
     color: {t["error"]};
     border: 1px solid {t["ghost-border"]};
     border-radius: {t["r-l"]};
-    padding: 6px 16px;
+    padding: 6px {t["sp-l"]};
 }}
 
 QPushButton[button_role="destructive"]:hover {{
@@ -231,7 +232,7 @@ QComboBox {{
     border: 1px solid {t["ghost-border"]};
     color: {t["text-bright"]};
     border-radius: {t["r-m"]};
-    padding: 7px 12px;
+    padding: 7px {t["sp-m"]};
 }}
 
 QLineEdit:focus,
@@ -259,7 +260,7 @@ QComboBox QAbstractItemView {{
 QCheckBox,
 QRadioButton {{
     color: {t["text-primary"]};
-    spacing: 8px;
+    spacing: {t["sp-s"]};
 }}
 
 QCheckBox::indicator,
@@ -313,8 +314,8 @@ QProgressBar {{
     border: none;
     text-align: center;
     color: transparent;
-    min-height: 6px;
-    max-height: 6px;
+    min-height: 4px;
+    max-height: 4px;
 }}
 
 QProgressBar::chunk {{
@@ -362,7 +363,7 @@ QHeaderView::section {{
     background: {t["bg-surface"]};
     color: {t["text-dim"]};
     border: none;
-    padding: 8px 10px;
+    padding: {t["sp-s"]} 10px;
     font-weight: 600;
     font-size: 10px;
     text-transform: uppercase;
@@ -371,7 +372,7 @@ QHeaderView::section {{
 /* ----- 13. QScrollBar:vertical ----- */
 QScrollBar:vertical {{
     background: transparent;
-    width: 6px;
+    width: 8px;
     border: none;
     margin: 2px;
 }}
@@ -400,7 +401,7 @@ QScrollBar::sub-page:vertical {{
 /* ----- 13b. QScrollBar:horizontal ----- */
 QScrollBar:horizontal {{
     background: transparent;
-    height: 6px;
+    height: 8px;
     border: none;
     margin: 2px;
 }}
@@ -452,7 +453,7 @@ QPushButton#sidebarItem {{
     color: {t["text-dim"]};
     text-align: left;
     border: none;
-    padding: 8px 12px;
+    padding: {t["sp-s"]} {t["sp-m"]};
     min-height: 32px;
     border-radius: {t["r-m"]};
     font-size: 12px;
@@ -475,16 +476,16 @@ QLabel#sidebarSection {{
     font-weight: 700;
     text-transform: uppercase;
     color: {t["text-muted"]};
-    padding: 6px 12px 2px 12px;
-    letter-spacing: 1px;
+    padding: 6px {t["sp-m"]} 2px {t["sp-m"]};
+    letter-spacing: 0.5px;
 }}
 
 /* ----- 18. QLabel#pageTitle — Manrope headline ----- */
 QLabel#pageTitle {{
     color: {t["text-bright"]};
     font-family: {hl};
-    font-size: 22px;
-    font-weight: 800;
+    font-size: 24px;
+    font-weight: 700;
 }}
 
 /* ----- 19. QLabel#pageDescription ----- */
@@ -497,21 +498,21 @@ QLabel#pageDescription {{
 QWidget#logFeed {{
     background: {t["bg-panel"]};
     border: 1px solid {t["ghost-border"]};
-    border-radius: {t["r-xl"]};
+    border-radius: {t["r-l"]};
 }}
 
 /* ----- 21. QWidget#activityDrawer ----- */
 QWidget#activityDrawer {{
     background: {t["bg-panel"]};
     border: 1px solid {t["ghost-border"]};
-    border-radius: {t["r-xl"]};
+    border-radius: {t["r-l"]};
 }}
 
 /* ----- 22. QWidget#dpanel (DataPanel) — tonal card with ghost border ----- */
 QWidget#dpanel {{
     background: {t["bg-panel"]};
     border: 1px solid {t["ghost-border"]};
-    border-radius: {t["r-xl"]};
+    border-radius: {t["r-l"]};
 }}
 
 QWidget#dpanelHeader {{
@@ -531,11 +532,11 @@ QLabel#dpanelTitle {{
 
 /* ----- 23. QGroupBox ----- */
 QGroupBox {{
-    border: 1px solid {t["ghost-border"]};
+    border: 1px solid {t["outline-variant"]};
     border-radius: {t["r-l"]};
     color: {t["text-dim"]};
-    margin-top: 16px;
-    padding: 12px;
+    margin-top: {t["sp-l"]};
+    padding: {t["sp-m"]};
 }}
 
 QGroupBox::title {{
@@ -577,11 +578,11 @@ QMenu {{
     color: {t["text-primary"]};
     border: 1px solid {t["ghost-border"]};
     border-radius: {t["r-m"]};
-    padding: 4px;
+    padding: {t["sp-xs"]};
 }}
 
 QMenu::item {{
-    padding: 6px 24px 6px 12px;
+    padding: 6px {t["sp-xl"]} 6px {t["sp-m"]};
     border-radius: {t["r-s"]};
 }}
 
@@ -697,8 +698,8 @@ QTextEdit#monoText {{
 QWidget#statCard {{
     background: {t["surface-container-highest"]};
     border: 1px solid {t["ghost-border"]};
-    border-radius: {t["r-xl"]};
-    padding: 8px 16px;
+    border-radius: {t["r-l"]};
+    padding: {t["sp-s"]} {t["sp-l"]};
 }}
 
 QLabel#statValue {{
@@ -773,7 +774,7 @@ QPushButton#headerTab {{
     background: transparent;
     color: {t["text-dim"]};
     border: none;
-    padding: 4px 12px;
+    padding: {t["sp-xs"]} {t["sp-m"]};
     border-radius: {t["r-m"]};
     font-size: 12px;
     font-weight: 600;
@@ -832,7 +833,7 @@ QPushButton#sidebarCta {{
     color: {t["text-on-cyan"]};
     border: none;
     border-radius: {t["r-m"]};
-    padding: 8px 16px;
+    padding: {t["sp-s"]} {t["sp-l"]};
     font-family: {hl};
     font-weight: 700;
     font-size: 11px;
@@ -866,8 +867,8 @@ QPushButton#collapsibleToggle {{
 QWidget#configBar {{
     background: {t["bg-panel"]};
     border: 1px solid {t["ghost-border"]};
-    border-radius: {t["r-xl"]};
-    padding: 4px 8px;
+    border-radius: {t["r-l"]};
+    padding: {t["sp-xs"]} {t["sp-s"]};
 }}
 
 QLabel#configLabel {{
@@ -950,5 +951,29 @@ QLabel#logTimestamp {{
 QLabel#logMessage {{
     color: {t["text-primary"]};
     font-size: 11px;
+}}
+
+/* ----- 48. Drop overlay ----- */
+QWidget#dropOverlay {{
+    background: rgba(14, 14, 16, 0.85);
+    border: 2px dashed {t["primary"]};
+    border-radius: {t["r-xl"]};
+}}
+
+QLabel#dropOverlayIcon {{
+    color: {t["primary"]};
+    font-size: 48px;
+}}
+
+QLabel#dropOverlayText {{
+    color: {t["text-bright"]};
+    font-family: {hl};
+    font-size: 18px;
+    font-weight: 700;
+}}
+
+QLabel#dropOverlayHint {{
+    color: {t["text-dim"]};
+    font-size: 12px;
 }}
 """

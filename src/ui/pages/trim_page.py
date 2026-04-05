@@ -45,6 +45,7 @@ from ..components.data_panel import DataPanel
 from ..components.log_feed import LogFeed
 from ..components.page_header import PageHeader
 from ..components.split_layout import SplitLayout
+from ..widgets.drop_overlay import DropOverlay
 from ..widgets.segment_list_widget import SegmentListWidget
 from ..widgets.trim_timeline_widget import TrimTimelineWidget
 from ..widgets.video_preview_widget import VideoPreviewWidget
@@ -267,9 +268,7 @@ class TrimPage(QWidget):
         # 6. Export panel
         self._export_panel = DataPanel("Export")
 
-        self._lossless_checkbox = QCheckBox(
-            "Lossless export (fast, keyframe-limited)"
-        )
+        self._lossless_checkbox = QCheckBox("Lossless export (fast, keyframe-limited)")
         self._lossless_checkbox.setChecked(True)
         self._lossless_checkbox.setToolTip(
             "Copy streams without re-encoding. Very fast but cuts at keyframes only."
@@ -340,6 +339,26 @@ class TrimPage(QWidget):
         self._activity_drawer.set_content_widget(self._activity_log)
         right_layout.addWidget(self._activity_drawer, stretch=2)
 
+        # Drop overlay for drag-and-drop file loading
+        self.setAcceptDrops(True)
+        self._drop_overlay = DropOverlay(
+            self,
+            accepted_extensions=[
+                ".mp4",
+                ".mkv",
+                ".avi",
+                ".mov",
+                ".webm",
+                ".flv",
+                ".mp3",
+                ".wav",
+                ".flac",
+                ".ogg",
+                ".m4a",
+            ],
+        )
+        self._drop_overlay.set_hint("Video or audio files")
+
     # ------------------------------------------------------------------ #
     #  Signal wiring                                                       #
     # ------------------------------------------------------------------ #
@@ -371,16 +390,16 @@ class TrimPage(QWidget):
         self._split_btn.clicked.connect(self._on_split_segment)
         self._toggle_segment_btn.clicked.connect(self._on_toggle_segment)
         self._delete_segment_btn.clicked.connect(self._on_delete_segment)
-        self._segment_label_input.editingFinished.connect(
-            self._on_segment_label_edited
-        )
+        self._segment_label_input.editingFinished.connect(self._on_segment_label_edited)
 
         # Persist settings on change
         self._lossless_checkbox.stateChanged.connect(self._save_settings)
         self._output_input.textChanged.connect(self._save_settings)
         self._lossless_checkbox.stateChanged.connect(self._schedule_autosave)
         self._output_input.textChanged.connect(self._schedule_autosave)
-        self._export_mode_combo.currentIndexChanged.connect(self._on_export_mode_changed)
+        self._export_mode_combo.currentIndexChanged.connect(
+            self._on_export_mode_changed
+        )
 
         # Wire injected preview widget
         if self._video_preview is not None:
@@ -576,7 +595,9 @@ class TrimPage(QWidget):
     def _on_save_project(self) -> None:
         """Persist the current editor state as a project JSON file."""
         if not self._editor_session.has_source:
-            QMessageBox.information(self, "No Project State", "Load a video before saving a project.")
+            QMessageBox.information(
+                self, "No Project State", "Load a video before saving a project."
+            )
             return
 
         start_dir = get_dialog_start_dir("", "dialogs.last_dir")
@@ -656,7 +677,9 @@ class TrimPage(QWidget):
         if self._video_preview is not None and self._video_preview.is_available():
             self._video_preview.load_video(path)
         else:
-            self._diagnostics.record("warning", "Preview backend unavailable, using ffprobe duration only.")
+            self._diagnostics.record(
+                "warning", "Preview backend unavailable, using ffprobe duration only."
+            )
 
         self._schedule_autosave()
 
@@ -805,7 +828,9 @@ class TrimPage(QWidget):
         position = self._video_preview.get_position()
         if self._editor_session.split_at(position) is None:
             self._status_label.setVisible(True)
-            self._status_label.setText("Move away from the segment edge before splitting.")
+            self._status_label.setText(
+                "Move away from the segment edge before splitting."
+            )
             return
 
         self._status_label.setVisible(True)
@@ -890,11 +915,19 @@ class TrimPage(QWidget):
 
     def _on_browse_output(self) -> None:
         """Browse for output folder or merged file path."""
-        start_dir = get_dialog_start_dir(self._output_input.text(), "trim.single_output_dir")
+        start_dir = get_dialog_start_dir(
+            self._output_input.text(), "trim.single_output_dir"
+        )
         if self._export_mode() == ExportMode.MERGED:
-            current_source = Path(self._current_path) if self._current_path else Path(start_dir) / "merged.mp4"
+            current_source = (
+                Path(self._current_path)
+                if self._current_path
+                else Path(start_dir) / "merged.mp4"
+            )
             suggested = self._output_input.text() or str(
-                current_source.with_name(f"{current_source.stem}_merged{current_source.suffix}")
+                current_source.with_name(
+                    f"{current_source.stem}_merged{current_source.suffix}"
+                )
             )
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
@@ -954,7 +987,9 @@ class TrimPage(QWidget):
 
         self._present_plan_warnings(plan)
         if plan.requires_confirmation and not self._confirm_export(plan):
-            self._diagnostics.record("warning", "Export cancelled after warning review.")
+            self._diagnostics.record(
+                "warning", "Export cancelled after warning review."
+            )
             return
 
         self._export_manager.start(plan)
@@ -1078,7 +1113,9 @@ class TrimPage(QWidget):
         name = Path(path).name if path else f"Job {job_id}"
         self._status_label.setText(f"Trimming {name}…")
 
-    def _on_job_progress(self, job_id: int, percent: float, speed: str = "", eta: str = "") -> None:
+    def _on_job_progress(
+        self, job_id: int, percent: float, speed: str = "", eta: str = ""
+    ) -> None:
         """Handle job progress update."""
         self._progress_bar.setValue(int(percent))
 
@@ -1189,6 +1226,30 @@ class TrimPage(QWidget):
         super().showEvent(event)
         self._reload_shortcuts()
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "_drop_overlay"):
+            self._drop_overlay.resize_to_parent()
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self._drop_overlay.resize_to_parent()
+            self._drop_overlay.raise_()
+            self._drop_overlay.show()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._drop_overlay.hide()
+
+    def dropEvent(self, event) -> None:
+        self._drop_overlay.hide()
+        urls = event.mimeData().urls()
+        for url in urls:
+            path = url.toLocalFile()
+            if path:
+                self._load_video(path)
+                break  # Trim works with one file at a time
+
     def _refresh_editor_ui(self) -> None:
         """Re-sync editor controls from the in-memory session."""
         self._syncing_editor_ui = True
@@ -1245,7 +1306,10 @@ class TrimPage(QWidget):
             return [str(base_dir / f"{input_file.stem}_trimmed{input_file.suffix}")]
 
         return [
-            str(base_dir / f"{input_file.stem}_trimmed_{index + 1:03d}{input_file.suffix}")
+            str(
+                base_dir
+                / f"{input_file.stem}_trimmed_{index + 1:03d}{input_file.suffix}"
+            )
             for index in range(count)
         ]
 
@@ -1269,9 +1333,7 @@ class TrimPage(QWidget):
         self._set_start_btn.setEnabled(is_interactive and has_selection)
         self._set_end_btn.setEnabled(is_interactive and has_selection)
         self._remove_video_btn.setEnabled(is_interactive and bool(self._current_path))
-        self._trim_btn.setEnabled(
-            is_interactive and source_exists and has_enabled
-        )
+        self._trim_btn.setEnabled(is_interactive and source_exists and has_enabled)
 
     def _format_timestamp(self, seconds: float) -> str:
         seconds = max(0.0, seconds)
@@ -1369,7 +1431,9 @@ class TrimPage(QWidget):
             if self._video_preview is not None and self._video_preview.is_available():
                 self._video_preview.load_video(session.source_path)
         else:
-            self._status_label.setText("Saved source file is missing. Relink by loading the source again.")
+            self._status_label.setText(
+                "Saved source file is missing. Relink by loading the source again."
+            )
             self._diagnostics.record(
                 "warning",
                 "Saved source file is missing. Load the original media again to restore preview/export.",

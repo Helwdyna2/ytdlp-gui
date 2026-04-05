@@ -62,6 +62,7 @@ from ..components.page_header import PageHeader
 from ..components.split_layout import SplitLayout
 from ..components.data_panel import DataPanel
 from ..widgets.convert_queue_widget import ConvertQueueWidget
+from ..widgets.drop_overlay import DropOverlay
 from ..widgets.folder_preview_widget import FolderPreviewWidget
 from ..widgets.process_log_dialog import ProcessLogDialog
 
@@ -256,9 +257,7 @@ class FileListWidget(QWidget):
         self._scan_root = None
         self._update_loading_state()
 
-    def _add_paths(
-        self, paths: List[str], source_root: Optional[str] = None
-    ) -> None:
+    def _add_paths(self, paths: List[str], source_root: Optional[str] = None) -> None:
         """Add file paths to the list, skipping duplicates."""
         existing = set(self.get_file_paths())
         added_any = False
@@ -349,7 +348,10 @@ class FileListWidget(QWidget):
 
         self._update_loading_state()
         pending_count = len(self._entries) - self._render_index
-        if pending_count <= self.RENDER_BATCH_SIZE and not self._render_timer.isActive():
+        if (
+            pending_count <= self.RENDER_BATCH_SIZE
+            and not self._render_timer.isActive()
+        ):
             self._render_next_batch()
             return
 
@@ -359,7 +361,7 @@ class FileListWidget(QWidget):
     def _render_next_batch(self) -> None:
         """Append the next batch of queued items to the visible list."""
         end_index = min(self._render_index + self.RENDER_BATCH_SIZE, len(self._entries))
-        for path, source_root in self._entries[self._render_index:end_index]:
+        for path, source_root in self._entries[self._render_index : end_index]:
             item = QListWidgetItem(self._display_name_for_path(path, source_root))
             item.setData(FILE_PATH_ROLE, path)
             item.setData(SOURCE_ROOT_ROLE, source_root)
@@ -615,10 +617,32 @@ class ConvertPage(QWidget):
 
         root.addWidget(split, stretch=1)
 
+        # Drag-and-drop overlay
+        self.setAcceptDrops(True)
+        self._drop_overlay = DropOverlay(
+            self,
+            accepted_extensions=[
+                ".mp4",
+                ".mkv",
+                ".avi",
+                ".mov",
+                ".webm",
+                ".flv",
+                ".mp3",
+                ".wav",
+                ".flac",
+                ".ogg",
+                ".m4a",
+            ],
+        )
+        self._drop_overlay.set_hint("Video or audio files")
+
     def _connect_signals(self) -> None:
         """Wire up all signal connections."""
         self._file_list.files_changed.connect(self._on_files_changed)
-        self._file_list.loading_state_changed.connect(self._on_file_list_loading_changed)
+        self._file_list.loading_state_changed.connect(
+            self._on_file_list_loading_changed
+        )
         self._queue_widget.reorder_requested.connect(self._on_queue_reorder_requested)
         self._queue_widget.skip_requested.connect(self._on_queue_skip_requested)
         self._queue_widget.prioritize_requested.connect(
@@ -628,9 +652,7 @@ class ConvertPage(QWidget):
         self._cancel_btn.clicked.connect(self._on_cancel)
         self._crf_slider.valueChanged.connect(self._on_crf_changed)
         self._codec_combo.currentIndexChanged.connect(self._on_output_codec_changed)
-        self._resolution_combo.currentIndexChanged.connect(
-            self._on_resolution_changed
-        )
+        self._resolution_combo.currentIndexChanged.connect(self._on_resolution_changed)
         self._audio_mode_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._frame_rate_combo.currentIndexChanged.connect(self._on_settings_changed)
         self._preset_combo.currentIndexChanged.connect(self._on_settings_changed)
@@ -661,7 +683,9 @@ class ConvertPage(QWidget):
             self._set_selected_output_codec(codec)
 
             resolution = self._normalize_resolution_value(
-                self._config_service.get("convert.resolution", SAME_AS_SOURCE_RESOLUTION)
+                self._config_service.get(
+                    "convert.resolution", SAME_AS_SOURCE_RESOLUTION
+                )
             )
             self._set_selected_resolution(resolution)
 
@@ -729,7 +753,9 @@ class ConvertPage(QWidget):
         """Detect available hardware encoders and configure combo."""
         try:
             self._hardware_encoders = get_cached_hardware_encoders()
-            preferred_hardware = self._config_service.get("convert.hardware_encoder", "")
+            preferred_hardware = self._config_service.get(
+                "convert.hardware_encoder", ""
+            )
             saved_use_hardware = self._config_service.get(
                 "convert.use_hardware_accel", False
             )
@@ -834,9 +860,13 @@ class ConvertPage(QWidget):
 
         files_to_convert = [item.input_path for item in startable_items]
 
-        unsupported_source_paths = self._unsupported_source_output_paths(files_to_convert)
+        unsupported_source_paths = self._unsupported_source_output_paths(
+            files_to_convert
+        )
         if unsupported_source_paths:
-            unsupported_names = [Path(path).name for path in unsupported_source_paths[:5]]
+            unsupported_names = [
+                Path(path).name for path in unsupported_source_paths[:5]
+            ]
             remaining = len(unsupported_source_paths) - len(unsupported_names)
             suffix = f"\n...and {remaining} more file(s)." if remaining > 0 else ""
             QMessageBox.warning(
@@ -849,7 +879,9 @@ class ConvertPage(QWidget):
 
         incompatible_audio_paths = self._incompatible_audio_copy_paths(files_to_convert)
         if incompatible_audio_paths:
-            incompatible_names = [Path(path).name for path in incompatible_audio_paths[:5]]
+            incompatible_names = [
+                Path(path).name for path in incompatible_audio_paths[:5]
+            ]
             remaining = len(incompatible_audio_paths) - len(incompatible_names)
             suffix = f"\n...and {remaining} more file(s)." if remaining > 0 else ""
             output_label = self._codec_combo.currentText()
@@ -874,22 +906,17 @@ class ConvertPage(QWidget):
 
     def pause_for_saved_task(self) -> dict:
         """Pause the current run and return a persistence payload."""
-        is_running = (
-            self._conversion_manager is not None
-            and (
-                bool(self._job_id_to_queue_item_id)
-                or self._active_queue_item_id is not None
-                or self._cancel_btn.isVisible()
-            )
+        is_running = self._conversion_manager is not None and (
+            bool(self._job_id_to_queue_item_id)
+            or self._active_queue_item_id is not None
+            or self._cancel_btn.isVisible()
         )
         if is_running:
             self._pause_requested_during_run = True
             if self._conversion_manager:
                 self._conversion_manager.cancel_all()
             self._mark_active_queue_item_incomplete()
-            self._mark_unstarted_queue_items_incomplete(
-                detail="Paused before start"
-            )
+            self._mark_unstarted_queue_items_incomplete(detail="Paused before start")
         return self.build_saved_task_payload()
 
     def build_saved_task_payload(self) -> dict:
@@ -1009,8 +1036,12 @@ class ConvertPage(QWidget):
     ) -> None:
         """Mark job as complete or failed in the list and queue."""
         error_text = error or "Failed"
-        was_cancelled = "cancelled" in error_text.lower() or "canceled" in error_text.lower()
-        status_text = "Complete" if success else ("Cancelled" if was_cancelled else "Failed")
+        was_cancelled = (
+            "cancelled" in error_text.lower() or "canceled" in error_text.lower()
+        )
+        status_text = (
+            "Complete" if success else ("Cancelled" if was_cancelled else "Failed")
+        )
 
         if success:
             self._done_count += 1
@@ -1050,7 +1081,9 @@ class ConvertPage(QWidget):
 
         self._process_log_dialog.upsert_record(
             str(job_id),
-            title=Path(self._job_input_paths.get(job_id, output_path or str(job_id))).name,
+            title=Path(
+                self._job_input_paths.get(job_id, output_path or str(job_id))
+            ).name,
             input_path=self._job_input_paths.get(job_id, ""),
             status=status_text,
             output_path=output_path,
@@ -1161,13 +1194,18 @@ class ConvertPage(QWidget):
         if self._get_selected_output_codec() != SAME_AS_SOURCE_CODEC:
             return []
 
-        paths = input_paths if input_paths is not None else self._file_list.get_file_paths()
+        paths = (
+            input_paths if input_paths is not None else self._file_list.get_file_paths()
+        )
         unsupported_paths: List[str] = []
         for path in paths:
-            if resolve_conversion_output_codec(
-                SAME_AS_SOURCE_CODEC,
-                self._file_codecs.get(path),
-            ) is None:
+            if (
+                resolve_conversion_output_codec(
+                    SAME_AS_SOURCE_CODEC,
+                    self._file_codecs.get(path),
+                )
+                is None
+            ):
                 unsupported_paths.append(path)
         return unsupported_paths
 
@@ -1203,7 +1241,9 @@ class ConvertPage(QWidget):
         normalized = legacy_map.get(normalized, normalized)
 
         combined = set(HORIZONTAL_RESOLUTIONS)
-        combined.update(f"horizontal:{resolution}" for resolution in HORIZONTAL_RESOLUTIONS)
+        combined.update(
+            f"horizontal:{resolution}" for resolution in HORIZONTAL_RESOLUTIONS
+        )
         combined.update(f"vertical:{resolution}" for resolution in VERTICAL_RESOLUTIONS)
         return normalized if normalized in combined else SAME_AS_SOURCE_RESOLUTION
 
@@ -1398,10 +1438,16 @@ class ConvertPage(QWidget):
         selected_output_codec = self._get_selected_output_codec()
         is_same_as_source = selected_output_codec == SAME_AS_SOURCE_CODEC
 
-        if not is_same_as_source and selected_output_codec not in {"h264", "hevc", "vp9"}:
+        if not is_same_as_source and selected_output_codec not in {
+            "h264",
+            "hevc",
+            "vp9",
+        }:
             return []
 
-        paths = input_paths if input_paths is not None else self._file_list.get_file_paths()
+        paths = (
+            input_paths if input_paths is not None else self._file_list.get_file_paths()
+        )
         incompatible_paths: List[str] = []
         for path in paths:
             if is_same_as_source:
@@ -1425,7 +1471,10 @@ class ConvertPage(QWidget):
             metadata = self._file_metadata.get(path)
             audio_codec = getattr(metadata, "audio_codec", "")
             normalized_audio_codec = normalize_conversion_codec(audio_codec)
-            if normalized_audio_codec and normalized_audio_codec not in allowed_audio_codecs:
+            if (
+                normalized_audio_codec
+                and normalized_audio_codec not in allowed_audio_codecs
+            ):
                 incompatible_paths.append(path)
         return incompatible_paths
 
@@ -1448,9 +1497,7 @@ class ConvertPage(QWidget):
             self._saved_hw_encoder = self._hw_combo.currentData()
             self._hw_combo.blockSignals(True)
             self._hw_combo.setEnabled(False)
-            status_message = (
-                "Hardware acceleration is unavailable when output format is set to Same as source."
-            )
+            status_message = "Hardware acceleration is unavailable when output format is set to Same as source."
             self._hw_combo.setToolTip(status_message)
             self._hw_status_label.setText(status_message)
             self._hw_status_label.setVisible(True)
@@ -1507,7 +1554,9 @@ class ConvertPage(QWidget):
 
         current_paths = self._file_list.get_file_paths()
         self._file_codecs = {
-            path: codec for path, codec in self._file_codecs.items() if path in current_paths
+            path: codec
+            for path, codec in self._file_codecs.items()
+            if path in current_paths
         }
         self._file_metadata = {
             path: metadata
@@ -1530,7 +1579,9 @@ class ConvertPage(QWidget):
         )
         self._preflight_worker = worker
         worker.completed.connect(
-            lambda results, rid=request_id, active_worker=worker: self._on_preflight_scan_completed(
+            lambda results,
+            rid=request_id,
+            active_worker=worker: self._on_preflight_scan_completed(
                 rid, active_worker, results
             )
         )
@@ -1663,14 +1714,18 @@ class ConvertPage(QWidget):
                 )
             )
             self._set_selected_resolution(
-                self._normalize_resolution_value(config_payload.get("output_resolution"))
+                self._normalize_resolution_value(
+                    config_payload.get("output_resolution")
+                )
             )
             raw_crf = config_payload.get("crf_value")
             try:
                 crf_parsed = int(raw_crf) if raw_crf is not None else DEFAULT_CRF
             except (TypeError, ValueError):
                 crf_parsed = DEFAULT_CRF
-            crf_clamped = max(self._crf_slider.minimum(), min(self._crf_slider.maximum(), crf_parsed))
+            crf_clamped = max(
+                self._crf_slider.minimum(), min(self._crf_slider.maximum(), crf_parsed)
+            )
             self._crf_slider.setValue(crf_clamped)
             self._crf_label.setText(str(self._crf_slider.value()))
 
@@ -1680,7 +1735,9 @@ class ConvertPage(QWidget):
 
             self._output_input.setText(str(config_payload.get("output_dir") or ""))
 
-            skip_matching = bool(config_payload.get("skip_matching_output_enabled", False))
+            skip_matching = bool(
+                config_payload.get("skip_matching_output_enabled", False)
+            )
             self._source_codec_filter_check.setChecked(skip_matching)
 
             hardware_encoder = config_payload.get("hardware_encoder")
@@ -1708,7 +1765,9 @@ class ConvertPage(QWidget):
             for input_path in input_paths
         }
 
-    def _build_queue_output_path(self, input_path: str, source_root: Optional[str]) -> str:
+    def _build_queue_output_path(
+        self, input_path: str, source_root: Optional[str]
+    ) -> str:
         """Build the output path for a queue item."""
         output_dir = self._output_input.text().strip() or None
         return build_conversion_output_path(
@@ -1752,9 +1811,7 @@ class ConvertPage(QWidget):
             source_root=item.source_root if source_root is None else source_root,
             status=item.status if status is None else status,
             progress_percent=(
-                item.progress_percent
-                if progress_percent is None
-                else progress_percent
+                item.progress_percent if progress_percent is None else progress_percent
             ),
             detail=item.detail if detail is None else detail,
             error_message=(
@@ -1822,9 +1879,8 @@ class ConvertPage(QWidget):
         updated_items: List[ConvertQueueItem] = []
         changed = False
         for item in self._queue_items:
-            if (
-                item.status is ConvertQueueItemStatus.SKIPPED
-                and item.detail.startswith("Skipped (")
+            if item.status is ConvertQueueItemStatus.SKIPPED and item.detail.startswith(
+                "Skipped ("
             ):
                 updated_items.append(
                     self._replace_queue_item(
@@ -1910,9 +1966,8 @@ class ConvertPage(QWidget):
             item = self._replace_queue_item(
                 item,
                 item_id=item.input_path,
-                display_name=item.display_name or self._display_name_for_queue_item(
-                    item.input_path, item.source_root
-                ),
+                display_name=item.display_name
+                or self._display_name_for_queue_item(item.input_path, item.source_root),
             )
             if item.status is ConvertQueueItemStatus.PROCESSING:
                 normalized_items.append(
@@ -2093,7 +2148,9 @@ class ConvertPage(QWidget):
             return
         if source_index < 0 or target_index < 0:
             return
-        if source_index >= len(self._queue_items) or target_index >= len(self._queue_items):
+        if source_index >= len(self._queue_items) or target_index >= len(
+            self._queue_items
+        ):
             return
 
         item = self._queue_items.pop(source_index)
@@ -2203,8 +2260,7 @@ class ConvertPage(QWidget):
 
         has_startable = self._has_startable_queue_items()
         has_skipped = any(
-            item.status == ConvertQueueItemStatus.SKIPPED
-            for item in self._queue_items
+            item.status == ConvertQueueItemStatus.SKIPPED for item in self._queue_items
         )
         if has_skipped and not has_startable:
             self._preflight_status_label.setText(
@@ -2272,3 +2328,32 @@ class ConvertPage(QWidget):
         self._output_input.setEnabled(enabled)
         self._output_browse_btn.setEnabled(enabled)
         self._view_log_btn.setEnabled(True)
+
+    # ------------------------------------------------------------------
+    # Drag-and-drop support
+    # ------------------------------------------------------------------
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_drop_overlay"):
+            self._drop_overlay.resize_to_parent()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self._drop_overlay.resize_to_parent()
+            self._drop_overlay.raise_()
+            self._drop_overlay.show()
+
+    def dragLeaveEvent(self, event):
+        self._drop_overlay.hide()
+
+    def dropEvent(self, event):
+        self._drop_overlay.hide()
+        paths = []
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if path:
+                paths.append(path)
+        if paths:
+            self._add_paths(paths)

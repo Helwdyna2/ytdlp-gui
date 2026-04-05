@@ -96,6 +96,10 @@ class ThemeEngine(QObject):
         """Get a color token value for the current theme."""
         return self._tokens[self._current_theme][key]
 
+    def color(self, key: str) -> str:
+        """Alias for get_color() — shorter for QPainter code."""
+        return self.get_color(key)
+
     def get_tokens(self) -> dict:
         """Get the full token dictionary for the current theme."""
         return dict(self._tokens[self._current_theme])

@@ -1,3 +1,7 @@
 - Convert runtime logs now use a reusable `ProcessLogDialog`; future screens can feed it with generic item records plus `add_log_entry(...)` instead of building screen-specific log popouts.
 - `FFmpegWorker` exposes the exact formatted command through `command_built`, and `ConversionManager` forwards it as `job_command_built(job_id, input_path, command)` for UI-safe signal/slot wiring.
 - Do not persist UI state during `ConvertPage._load_settings()`: saving too early can overwrite hardware selections before encoder detection runs.
+- Timeline `_TimelineCanvas` is QPainter-based and cannot use QSS for colors. Use `ThemeEngine.get_color(key)` with tokens defined in `tokens.py` (DARK_TOKENS/LIGHT_TOKENS). Token keys must also be listed in `REQUIRED_TOKEN_KEYS`.
+- `qss_builder.py` spacing tokens (`sp-xs` through `sp-3xl`) are now wired — use `{sp-md}` etc. in QSS templates instead of hardcoded px values. Drop overlay styling also lives in `qss_builder.py`.
+- The reusable `DropOverlay` widget (`src/ui/widgets/drop_overlay.py`) uses `WA_TransparentForMouseEvents` and must be resized via `resize_to_parent()` in the host page's `resizeEvent`. Host pages handle `dragEnterEvent`/`dragLeaveEvent`/`dropEvent` and call overlay `show()`/`hide()`.
+- ConvertPage drop uses `self._add_paths(paths)` (a method on ConvertPage itself, not on `_file_list`). TrimPage drop uses `self._load_video(path)` for a single file.

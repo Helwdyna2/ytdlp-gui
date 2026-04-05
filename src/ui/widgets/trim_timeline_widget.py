@@ -10,6 +10,7 @@ from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QPen
 from PyQt6.QtWidgets import QLabel, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 
 from ..theme.style_utils import set_status_color
+from ..theme.theme_engine import ThemeEngine
 
 
 @dataclass(slots=True)
@@ -37,6 +38,7 @@ class _TimelineCanvas(QWidget):
         self._segments: list[_SegmentView] = []
         self._selected_segment_id: Optional[str] = None
         self._drag_mode: Optional[str] = None
+        self._seeking = False
         self._segment_rects: dict[str, QRectF] = {}
         self.setMinimumHeight(88)
         self.setMouseTracking(True)
@@ -62,14 +64,15 @@ class _TimelineCanvas(QWidget):
         track_rect = self._track_rect()
         palette = self.palette()
         surface = palette.color(self.backgroundRole())
-        base_border = QColor("#30343f")
-        base_fill = QColor("#191c25")
-        disabled_fill = QColor("#2b2f39")
-        selected_fill = QColor("#5e5ad7")
-        selected_border = QColor("#c6c3ff")
-        enabled_fill = QColor("#3e546b")
-        handle_fill = QColor("#f4f1ff")
-        playhead_color = QColor("#3bd1ff")
+        engine = ThemeEngine.instance()
+        base_border = QColor(engine.get_color("timeline-base-border"))
+        base_fill = QColor(engine.get_color("timeline-base-fill"))
+        disabled_fill = QColor(engine.get_color("timeline-disabled-fill"))
+        selected_fill = QColor(engine.get_color("timeline-selected-fill"))
+        selected_border = QColor(engine.get_color("timeline-selected-border"))
+        enabled_fill = QColor(engine.get_color("timeline-enabled-fill"))
+        handle_fill = QColor(engine.get_color("timeline-handle-fill"))
+        playhead_color = QColor(engine.get_color("timeline-playhead"))
 
         painter.setPen(QPen(base_border, 1))
         painter.setBrush(base_fill)
@@ -88,7 +91,11 @@ class _TimelineCanvas(QWidget):
             painter.setBrush(fill)
             painter.drawRoundedRect(rect, 8, 8)
 
-            painter.setPen(QColor("#ffffff") if is_selected else QColor("#e7ebf3"))
+            painter.setPen(
+                QColor(engine.get_color("text-bright"))
+                if is_selected
+                else QColor(engine.get_color("timeline-text"))
+            )
             label = segment.label or f"{index + 1}"
             text_rect = rect.adjusted(10, 0, -10, 0)
             if text_rect.width() > 18:
@@ -101,17 +108,22 @@ class _TimelineCanvas(QWidget):
         if self._selected_segment_id:
             selected = self._selected_segment()
             if selected is not None:
+                pill_width = 6.0
+                pill_height = 20.0
+                pill_radius = 3.0
                 for handle_x in (
                     self._time_to_x(selected.start_time, track_rect),
                     self._time_to_x(selected.end_time, track_rect),
                 ):
+                    pill_rect = QRectF(
+                        handle_x - pill_width / 2,
+                        track_rect.center().y() - pill_height / 2,
+                        pill_width,
+                        pill_height,
+                    )
                     painter.setPen(Qt.PenStyle.NoPen)
                     painter.setBrush(handle_fill)
-                    painter.drawEllipse(
-                        QPointF(handle_x, track_rect.center().y()),
-                        5.5,
-                        5.5,
-                    )
+                    painter.drawRoundedRect(pill_rect, pill_radius, pill_radius)
 
         if self._duration > 0:
             playhead_x = self._time_to_x(self._current_position, track_rect)
@@ -146,6 +158,7 @@ class _TimelineCanvas(QWidget):
             self.segment_selected.emit(segment_id)
 
         self.seek_requested.emit(self._x_to_time(event.position().x(), track_rect))
+        self._seeking = True
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         track_rect = self._track_rect()
@@ -158,17 +171,24 @@ class _TimelineCanvas(QWidget):
                 self.range_changed.emit(selected.start_time, position)
             return
 
+        if self._seeking:
+            self.seek_requested.emit(self._x_to_time(event.position().x(), track_rect))
+            return
+
         if selected is None:
             self.unsetCursor()
             return
 
-        if self._pressed_handle(event.position().x(), selected, track_rect, activate=False):
+        if self._pressed_handle(
+            event.position().x(), selected, track_rect, activate=False
+        ):
             self.setCursor(Qt.CursorShape.SizeHorCursor)
         else:
             self.unsetCursor()
 
     def mouseReleaseEvent(self, _event: QMouseEvent) -> None:
         self._drag_mode = None
+        self._seeking = False
         self.unsetCursor()
 
     def leaveEvent(self, _event) -> None:
@@ -301,7 +321,7 @@ class TrimTimelineWidget(QWidget):
         layout.addWidget(self._canvas)
 
         info_label = QLabel(
-            "Click anywhere to seek. Drag the highlighted segment handles to tighten a cut."
+            "Click or drag to seek. Use the handles to adjust segment boundaries."
         )
         info_label.setObjectName("dimLabel")
         info_label.setWordWrap(True)
