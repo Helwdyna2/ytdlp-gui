@@ -45,4 +45,5 @@ browser_profiles/
 ytdlp_gui.egg-info
 *.mkv
 *.mp4
-+pytest-of-*/
+trim_quick_session.json
+*.part

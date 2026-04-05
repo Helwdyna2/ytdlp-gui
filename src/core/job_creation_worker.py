@@ -91,6 +91,7 @@ class JobCreationWorker(QThread):
             for i, input_path in enumerate(self._input_paths):
                 if self._cancelled:
                     logger.info("Job creation cancelled")
+                    self.completed.emit(jobs)
                     return
 
                 # Create job (includes file stat and DB write)

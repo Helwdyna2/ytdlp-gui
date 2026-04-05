@@ -1,12 +1,14 @@
 """TrimPage — video trimming tool page."""
 
 import logging
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 from send2trash import send2trash
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -89,6 +91,8 @@ class TrimPage(QWidget):
         self._syncing_editor_ui = False
         self._is_running = False
         self._current_project_path: Optional[str] = None
+        self._baseline_snapshot: Optional[dict] = None
+        self._shortcuts: dict[str, QShortcut] = {}
 
         # Runtime state
         self._current_path: Optional[str] = None
@@ -106,6 +110,7 @@ class TrimPage(QWidget):
         self._setup_ui()
         self._connect_signals()
         self._load_settings()
+        self._setup_shortcuts()
         self._autosave_timer.timeout.connect(self._save_quick_session_now)
         self._restore_quick_session_if_enabled()
 
@@ -154,9 +159,13 @@ class TrimPage(QWidget):
         self._save_project_btn.setObjectName("btnWire")
         mode_row.addWidget(self._save_project_btn)
 
+        self._remove_video_btn = QPushButton("Remove Video")
+        self._remove_video_btn.setObjectName("btnWire")
+        mode_row.addWidget(self._remove_video_btn)
+
         main_layout.addLayout(mode_row)
 
-        split = SplitLayout(right_width=460)
+        split = SplitLayout(right_width=420)
         main_layout.addWidget(split, stretch=1)
 
         left_layout = QVBoxLayout(split.left_panel)
@@ -210,7 +219,7 @@ class TrimPage(QWidget):
         left_layout.addWidget(self._timeline_panel, stretch=2)
 
         # 5. Segments panel
-        self._segment_panel = DataPanel("Segments")
+        self._segment_panel = DataPanel("Segments to Export")
         segment_actions = QHBoxLayout()
         segment_actions.setSpacing(8)
 
@@ -344,6 +353,7 @@ class TrimPage(QWidget):
         self._load_video_btn.clicked.connect(self._on_load_video)
         self._load_project_btn.clicked.connect(self._on_load_project)
         self._save_project_btn.clicked.connect(self._on_save_project)
+        self._remove_video_btn.clicked.connect(self._on_remove_video)
 
         # Time control buttons
         self._set_start_btn.clicked.connect(self._on_set_start)
@@ -381,6 +391,7 @@ class TrimPage(QWidget):
         if self._trim_timeline is not None:
             self._trim_timeline.range_changed.connect(self._on_range_changed)
             self._trim_timeline.seek_requested.connect(self._on_timeline_seek_requested)
+            self._trim_timeline.segment_selected.connect(self._on_segment_selected)
 
         self._segment_list.segment_selected.connect(self._on_segment_selected)
         self._segment_list.segment_toggled.connect(self._on_segment_toggled)
@@ -412,6 +423,55 @@ class TrimPage(QWidget):
     def _build_default_video_preview(self) -> Optional[VideoPreviewWidget]:
         """Return the default preview widget for the Trim page."""
         return VideoPreviewWidget()
+
+    def _setup_shortcuts(self) -> None:
+        bindings = {
+            "split_segment": self._on_split_segment,
+            "delete_segment": self._on_delete_segment_shortcut,
+            "label_segment": self._focus_selected_segment_label,
+            "close_video": self._on_remove_video,
+        }
+        for name, handler in bindings.items():
+            shortcut = QShortcut(self)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(
+                lambda name=name, handler=handler: self._handle_shortcut(name, handler)
+            )
+            self._shortcuts[name] = shortcut
+        self._reload_shortcuts()
+
+    def _reload_shortcuts(self) -> None:
+        defaults = {
+            "split_segment": "S",
+            "delete_segment": "Backspace",
+            "label_segment": "L",
+            "close_video": QKeySequence(QKeySequence.StandardKey.Close).toString(),
+        }
+        for name, shortcut in self._shortcuts.items():
+            sequence = self._config_service.get(
+                f"trim.shortcuts.{name}",
+                defaults[name],
+            )
+            shortcut.setKey(QKeySequence(sequence))
+
+    def _handle_shortcut(self, name: str, handler) -> None:
+        if (
+            not self.isVisible()
+            or self._mode_combo.currentIndex() != self._MODE_SINGLE
+            or self._is_running
+        ):
+            return
+        if self._shortcut_should_be_ignored():
+            return
+        if name != "close_video" and self._editor_session.selected_segment is None:
+            return
+        if name == "close_video" and not self._editor_session.has_source:
+            return
+        handler()
+
+    def _shortcut_should_be_ignored(self) -> bool:
+        focus_widget = self.focusWidget()
+        return isinstance(focus_widget, (QLineEdit, QComboBox))
 
     # ------------------------------------------------------------------ #
     #  Settings persistence                                                #
@@ -465,6 +525,7 @@ class TrimPage(QWidget):
         self._load_video_btn.setVisible(is_single)
         self._load_project_btn.setVisible(is_single)
         self._save_project_btn.setVisible(is_single)
+        self._remove_video_btn.setVisible(is_single)
         self._preview_panel.setVisible(is_single)
         self._timeline_panel.setVisible(is_single)
         self._segment_panel.setVisible(is_single)
@@ -546,6 +607,25 @@ class TrimPage(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Project Save Failed", str(exc))
             self._diagnostics.record("error", f"Project save failed: {exc}")
+
+    def _on_remove_video(self) -> None:
+        """Close the current Trim source after confirming unsaved edits if needed."""
+        if not self._editor_session.has_source and not self._current_path:
+            return
+        if self._is_trim_dirty():
+            result = QMessageBox.warning(
+                self,
+                "Discard Trim Changes?",
+                "The current Trim session has unsaved edits. Remove the loaded video and clear these changes?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if result != QMessageBox.StandardButton.Yes:
+                return
+        self._clear_current_video()
+        self._status_label.setVisible(True)
+        self._status_label.setText("Removed the current video.")
+        self._diagnostics.record("info", "Cleared the current Trim source.")
 
     def _load_video(self, path: str) -> None:
         """Load a video file for preview and trimming."""
@@ -665,6 +745,7 @@ class TrimPage(QWidget):
 
         self._editor_session.load_source(self._current_path, duration)
         self._refresh_editor_ui()
+        self._mark_trim_clean()
         self._trim_btn.setEnabled(bool(self._editor_session.enabled_segments()))
         self._status_label.setText(f"Loaded {Path(self._current_path).name}")
         self._schedule_autosave()
@@ -779,6 +860,18 @@ class TrimPage(QWidget):
         self._status_label.setText("Segment deleted.")
         self._refresh_editor_ui()
         self._schedule_autosave()
+
+    def _on_delete_segment_shortcut(self) -> None:
+        if self._shortcut_should_be_ignored():
+            return
+        self._on_delete_segment()
+
+    def _focus_selected_segment_label(self) -> None:
+        segment = self._editor_session.selected_segment
+        if segment is None:
+            return
+        self._segment_label_input.setFocus()
+        self._segment_label_input.selectAll()
 
     def _on_segment_tags_edited(self) -> None:
         """Handle comma-separated tag edits for the active segment."""
@@ -1059,6 +1152,7 @@ class TrimPage(QWidget):
         self._load_video_btn.setEnabled(not running)
         self._load_project_btn.setEnabled(not running)
         self._save_project_btn.setEnabled(not running)
+        self._remove_video_btn.setEnabled(not running and bool(self._current_path))
         self._cancel_btn.setVisible(running)
         self._progress_bar.setVisible(running or not running)  # always show after start
         self._status_label.setVisible(True)
@@ -1091,12 +1185,20 @@ class TrimPage(QWidget):
         if self._video_preview is not None:
             self._video_preview.cleanup()
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._reload_shortcuts()
+
     def _refresh_editor_ui(self) -> None:
         """Re-sync editor controls from the in-memory session."""
         self._syncing_editor_ui = True
         segment = self._editor_session.selected_segment
 
         if self._trim_timeline is not None:
+            self._trim_timeline.set_segments(
+                self._editor_session.segments,
+                self._editor_session.selected_segment_id,
+            )
             if self._editor_session.duration > 0:
                 self._trim_timeline.set_duration(self._editor_session.duration)
             if segment is not None:
@@ -1166,6 +1268,7 @@ class TrimPage(QWidget):
         self._end_input.setEnabled(is_interactive and has_selection)
         self._set_start_btn.setEnabled(is_interactive and has_selection)
         self._set_end_btn.setEnabled(is_interactive and has_selection)
+        self._remove_video_btn.setEnabled(is_interactive and bool(self._current_path))
         self._trim_btn.setEnabled(
             is_interactive and source_exists and has_enabled
         )
@@ -1259,6 +1362,7 @@ class TrimPage(QWidget):
         self._export_mode_combo.setCurrentIndex(max(index, 0))
         self._sync_output_placeholder()
         self._refresh_editor_ui()
+        self._mark_trim_clean()
         self._status_label.setVisible(True)
 
         if session.source_path and Path(session.source_path).exists():
@@ -1270,6 +1374,44 @@ class TrimPage(QWidget):
                 "warning",
                 "Saved source file is missing. Load the original media again to restore preview/export.",
             )
+
+    def _capture_trim_state(self) -> dict:
+        return {
+            "session": self._editor_session.to_dict(),
+            "export": self._build_export_state(),
+        }
+
+    def _mark_trim_clean(self) -> None:
+        self._baseline_snapshot = deepcopy(self._capture_trim_state())
+
+    def _is_trim_dirty(self) -> bool:
+        if self._baseline_snapshot is None:
+            return False
+        return self._capture_trim_state() != self._baseline_snapshot
+
+    def _clear_current_video(self) -> None:
+        self._cancel_analysis_jobs(wait=True)
+        self._current_path = None
+        self._current_project_path = None
+        self._editor_session.clear()
+        self._source_metadata = {}
+        self._source_probe_payload = {}
+        self._keyframe_times = []
+        self._warning_label.clear()
+        self._warning_label.setVisible(False)
+        self._status_label.clear()
+        self._progress_bar.setValue(0)
+        self._start_input.clear()
+        self._end_input.clear()
+        self._segment_label_input.clear()
+        self._segment_tags_input.clear()
+        self._baseline_snapshot = None
+        if self._trim_timeline is not None:
+            self._trim_timeline.reset()
+        if self._video_preview is not None:
+            self._video_preview.unload_video()
+        self._quick_session_store.clear()
+        self._refresh_editor_ui()
 
     def _build_export_state(self) -> dict:
         return {

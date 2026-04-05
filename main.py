@@ -13,8 +13,11 @@ from src.utils.platform_utils import ensure_dirs, get_log_dir
 from src.utils.constants import APP_NAME, APP_VERSION
 from src.data.database import Database
 from src.data.repositories.session_repository import SessionRepository
+from src.data.repositories.saved_task_repository import SavedTaskRepository
 from src.services.crash_recovery_service import CrashRecoveryService
 from src.services.config_service import ConfigService
+from src.services.saved_task_service import SavedTaskService
+from src.services.session_service import SessionService
 from src.ui.main_window import MainWindow
 
 
@@ -121,7 +124,10 @@ def main():
         # Initialize services
         config_service = ConfigService()
         session_repo = SessionRepository(database)
+        saved_task_repo = SavedTaskRepository(database)
         crash_service = CrashRecoveryService(session_repo)
+        session_service = SessionService(session_repo)
+        saved_task_service = SavedTaskService(saved_task_repo)
 
         # Check for crash recovery
         session_to_restore = None
@@ -133,7 +139,14 @@ def main():
 
         # Create main window
         logger.info("Creating main window...")
-        main_window = MainWindow(database)
+        main_window = MainWindow(
+            database,
+            session_service,
+            saved_task_service=saved_task_service,
+        )
+
+        # Start auto-save
+        session_service.start_auto_save()
 
         # Restore session if available
         if session_to_restore:
@@ -150,6 +163,8 @@ def main():
         else:
             main_window.show()
 
+        main_window.prompt_restore_latest_saved_task()
+
         # Run application
         logger.info("Application started")
         exit_code = app.exec()
@@ -163,6 +178,7 @@ def main():
         config_service.set('window.maximized', main_window.isMaximized())
 
         # Clean shutdown
+        session_service.stop_auto_save()
         crash_service.release_lock()
         database.close()
 

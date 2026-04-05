@@ -65,6 +65,7 @@ class ConversionManager(QObject):
 
         # Job creation worker
         self._job_creation_worker: Optional[JobCreationWorker] = None
+        self._job_creation_cancelled = False
 
         # Configuration
         self._max_concurrent = 1  # Only one conversion at a time by default
@@ -162,6 +163,8 @@ class ConversionManager(QObject):
         if not output_directory:
             output_directory = str(Path(input_paths[0]).parent) if input_paths else "."
 
+        self._job_creation_cancelled = False
+
         # Create worker for background job creation
         self._job_creation_worker = JobCreationWorker(
             input_paths=input_paths,
@@ -191,6 +194,20 @@ class ConversionManager(QObject):
 
     def _on_jobs_created(self, jobs: List[ConversionJob]) -> None:
         """Handle completion of async job creation."""
+        if self._job_creation_cancelled:
+            for job in jobs:
+                job.status = ConversionStatus.CANCELLED
+                self._repository.update(job)
+
+            if self._job_creation_worker:
+                self._job_creation_worker.deleteLater()
+                self._job_creation_worker = None
+            self._job_creation_cancelled = False
+            self._emit_queue_progress()
+            self.all_completed.emit()
+            logger.info("Discarded job creation results after cancellation")
+            return
+
         # Add jobs to pending queue
         with QMutexLocker(self._mutex):
             self._pending_jobs.extend(jobs)
@@ -209,6 +226,7 @@ class ConversionManager(QObject):
     def _on_job_creation_error(self, error: str) -> None:
         """Handle error from job creation worker."""
         self.log.emit("error", f"Job creation failed: {error}")
+        self._job_creation_cancelled = False
 
         # Clean up worker
         if self._job_creation_worker:
@@ -277,6 +295,10 @@ class ConversionManager(QObject):
     def cancel_all(self) -> None:
         """Cancel all pending and active conversions."""
         with QMutexLocker(self._mutex):
+            if self._job_creation_worker is not None:
+                self._job_creation_cancelled = True
+                self._job_creation_worker.cancel()
+
             # Cancel active workers
             for job_id, worker in list(self._active_workers.items()):
                 worker.cancel()

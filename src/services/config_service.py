@@ -10,6 +10,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from PyQt6.QtGui import QKeySequence
+
 from ..utils.platform_utils import (
     get_config_path,
     get_default_output_dir,
@@ -91,6 +93,13 @@ DEFAULT_CONFIG = {
             "mute_during_scrub": True,
             "scrub_send_interval_ms": 24,
             "scrub_exact_settle_delay_ms": 120,
+            "scrub_step_seconds": 0.25,
+        },
+        "shortcuts": {
+            "split_segment": "S",
+            "delete_segment": "Backspace",
+            "label_segment": "L",
+            "close_video": "",
         },
     },
     "rename": {
@@ -335,6 +344,32 @@ class ConfigService:
             polite_changed = True
         self._config["download_polite"] = polite
         if polite_changed:
+            changed = True
+
+        trim = self._config.get("trim", {})
+        trim_changed = False
+
+        playback = trim.get("playback", {})
+        if "scrub_step_seconds" not in playback:
+            playback["scrub_step_seconds"] = 0.25
+            trim_changed = True
+        trim["playback"] = playback
+
+        shortcuts = trim.get("shortcuts", {})
+        standard_close = QKeySequence(QKeySequence.StandardKey.Close).toString()
+        shortcut_defaults = {
+            "split_segment": "S",
+            "delete_segment": "Backspace",
+            "label_segment": "L",
+            "close_video": standard_close,
+        }
+        for key, value in shortcut_defaults.items():
+            if not shortcuts.get(key):
+                shortcuts[key] = value
+                trim_changed = True
+        trim["shortcuts"] = shortcuts
+        self._config["trim"] = trim
+        if trim_changed:
             changed = True
 
         if changed:

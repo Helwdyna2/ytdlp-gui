@@ -1,9 +1,10 @@
 """Data models for the application."""
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional, List, Dict
+from typing import Any, Optional, List, Dict
 
 
 # =============================================================================
@@ -117,6 +118,91 @@ class Session:
             force_overwrite=self.force_overwrite,
             video_only=self.video_only,
             cookies_path=self.cookies_path,
+        )
+
+
+class SavedTaskStatus(Enum):
+    """Status of a saved task."""
+
+    ACTIVE = "active"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    DELETED = "deleted"
+
+
+@dataclass
+class SavedTask:
+    """Persisted task snapshot with JSON payloads."""
+
+    task_type: str = ""
+    title: str = ""
+    status: SavedTaskStatus = SavedTaskStatus.ACTIVE
+    payload: Dict[str, Any] = field(default_factory=dict)
+    summary: Dict[str, Any] = field(default_factory=dict)
+    id: Optional[int] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+    deleted_at: Optional[datetime] = None
+
+    @staticmethod
+    def _parse_json_object(value: Optional[str]) -> Dict[str, Any]:
+        """Parse a JSON object column, falling back to an empty mapping."""
+        if not value:
+            return {}
+
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+
+        return parsed if isinstance(parsed, dict) else {}
+
+    @classmethod
+    def from_row(cls, row) -> "SavedTask":
+        """Create SavedTask from database row."""
+        try:
+            status = SavedTaskStatus(row["status"])
+        except (ValueError, TypeError):
+            status = SavedTaskStatus.ACTIVE
+
+        try:
+            created_at = (
+                datetime.fromisoformat(row["created_at"])
+                if row["created_at"]
+                else datetime.now()
+            )
+        except (ValueError, TypeError):
+            created_at = datetime.now()
+
+        try:
+            updated_at = (
+                datetime.fromisoformat(row["updated_at"])
+                if row["updated_at"]
+                else datetime.now()
+            )
+        except (ValueError, TypeError):
+            updated_at = datetime.now()
+
+        try:
+            deleted_at = (
+                datetime.fromisoformat(row["deleted_at"])
+                if row["deleted_at"]
+                else None
+            )
+        except (ValueError, TypeError):
+            deleted_at = None
+
+        return cls(
+            id=row["id"],
+            task_type=row["task_type"],
+            title=row["title"],
+            status=status,
+            payload=cls._parse_json_object(row["payload_json"]),
+            summary=cls._parse_json_object(row["summary_json"]),
+            created_at=created_at,
+            updated_at=updated_at,
+            deleted_at=deleted_at,
         )
 
 

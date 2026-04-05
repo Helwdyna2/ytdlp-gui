@@ -89,6 +89,13 @@ def test_trim_page_progress_section_exists(qapp):
     assert isinstance(page._progress_bar, QProgressBar)
 
 
+def test_trim_page_has_remove_video_button(qapp):
+    from src.ui.pages.trim_page import TrimPage
+
+    page = TrimPage()
+    assert page._remove_video_btn.text() == "Remove Video"
+
+
 def test_trim_page_cleanup_waits_for_analysis_workers(qapp, monkeypatch):
     from src.ui.pages.trim_page import TrimPage
 
@@ -146,3 +153,93 @@ def test_trim_page_cleanup_waits_for_analysis_workers(qapp, monkeypatch):
     assert keyframe_worker.delete_later_calls == 1
     assert page._ffprobe_worker is None
     assert page._keyframe_worker is None
+
+
+def test_remove_video_clears_trim_state(qapp, qtbot, tmp_path):
+    from src.ui.pages.trim_page import TrimPage
+
+    source = tmp_path / "clip.mp4"
+    source.write_text("video")
+
+    page = TrimPage()
+    qtbot.addWidget(page)
+    page.show()
+
+    page._current_path = str(source)
+    page._editor_session.load_source(str(source), 12.0)
+    page._refresh_editor_ui()
+    page._mark_trim_clean()
+
+    page._on_remove_video()
+
+    assert page._current_path is None
+    assert not page._editor_session.has_source
+    assert page._segment_list._list.count() == 0
+
+
+def test_remove_video_prompts_when_dirty(qapp, qtbot, tmp_path, monkeypatch):
+    from src.ui.pages.trim_page import TrimPage
+    from PyQt6.QtWidgets import QMessageBox
+
+    source = tmp_path / "clip.mp4"
+    source.write_text("video")
+
+    page = TrimPage()
+    qtbot.addWidget(page)
+    page.show()
+
+    page._current_path = str(source)
+    page._editor_session.load_source(str(source), 12.0)
+    page._refresh_editor_ui()
+    page._mark_trim_clean()
+    page._editor_session.set_segment_label(page._editor_session.selected_segment.id, "Dirty")
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QMessageBox.StandardButton.No,
+    )
+
+    page._on_remove_video()
+
+    assert page._current_path == str(source)
+    assert page._editor_session.has_source
+
+
+def test_trim_shortcut_focuses_segment_label(qapp, qtbot, tmp_path):
+    from src.ui.pages.trim_page import TrimPage
+
+    source = tmp_path / "clip.mp4"
+    source.write_text("video")
+
+    page = TrimPage()
+    qtbot.addWidget(page)
+    page.show()
+
+    page._current_path = str(source)
+    page._editor_session.load_source(str(source), 12.0)
+    page._refresh_editor_ui()
+    page._handle_shortcut("label_segment", page._focus_selected_segment_label)
+
+    assert page._segment_label_input.selectedText() == page._segment_label_input.text()
+
+
+def test_trim_delete_shortcut_is_suppressed_while_typing(qapp, qtbot, tmp_path):
+    from src.ui.pages.trim_page import TrimPage
+
+    source = tmp_path / "clip.mp4"
+    source.write_text("video")
+
+    page = TrimPage()
+    qtbot.addWidget(page)
+    page.show()
+
+    page._current_path = str(source)
+    page._editor_session.load_source(str(source), 12.0)
+    page._refresh_editor_ui()
+    initial_count = len(page._editor_session.segments)
+
+    page._segment_label_input.setFocus()
+    page._handle_shortcut("delete_segment", page._on_delete_segment_shortcut)
+
+    assert len(page._editor_session.segments) == initial_count
