@@ -7,7 +7,7 @@ class SplitLayout(QWidget):
     Default proportions are roughly 8/12 + 4/12 (2:1).
     """
 
-    def __init__(self, right_width: int = 360, gap: int = 20, parent=None):
+    def __init__(self, right_width: int = 340, gap: int = 20, parent=None):
         super().__init__(parent)
         self.setObjectName("splitLayout")
 

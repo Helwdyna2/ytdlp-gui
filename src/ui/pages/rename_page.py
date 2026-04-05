@@ -27,7 +27,6 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QFileDialog,
-    QSizePolicy,
 )
 
 from ...core.ffprobe_worker import FFprobeWorker
@@ -307,7 +306,7 @@ class RenamePage(QWidget):
     """
     Rename page — batch file renaming with token-based pattern builder.
 
-    Replaces RenameTabWidget with a SplitLayout-based design.
+    Uses SplitLayout: preview table on the left, token builder on the right.
     Preserves all business logic: scanning, token ordering, preview, rename.
 
     Signals:
@@ -381,35 +380,57 @@ class RenamePage(QWidget):
         scan_row.addWidget(self._scan_status)
         root.addLayout(scan_row)
 
-        # 4. SplitLayout: token builder left (fixed ~260px), preview right (flex)
-        # We use a custom horizontal layout to give left a fixed width
-        split_container = QWidget()
-        split_container.setObjectName("splitLayout")
-        split_h = QHBoxLayout(split_container)
-        split_h.setContentsMargins(0, 0, 0, 0)
-        split_h.setSpacing(20)
+        # 4. SplitLayout: preview table left (expanding), token builder right (fixed)
+        split = SplitLayout(right_width=340, gap=20)
 
-        # --- LEFT panel (fixed 260px): token builder ---
-        left_panel = QWidget()
-        left_panel.setObjectName("splitLeft")
-        left_panel.setFixedWidth(260)
-        left_layout = QVBoxLayout(left_panel)
+        # --- LEFT panel (expanding): preview table ---
+        left_layout = QVBoxLayout(split.left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
+        left_layout.setSpacing(6)
+
+        preview_label = QLabel("Preview")
+        preview_label.setObjectName("sidebarSection")
+        left_layout.addWidget(preview_label)
+
+        # Select all row
+        select_row = QHBoxLayout()
+        self._select_all_checkbox = QCheckBox("Select All")
+        self._select_all_checkbox.setChecked(True)
+        self._select_all_checkbox.setTristate(True)
+        select_row.addWidget(self._select_all_checkbox)
+        select_row.addStretch()
+        self._selected_count_label = QLabel("0 of 0 selected")
+        select_row.addWidget(self._selected_count_label)
+        left_layout.addLayout(select_row)
+
+        self._preview_table = RenamePreviewTable()
+        left_layout.addWidget(self._preview_table, stretch=1)
+
+        # Conflict warning label
+        self._conflict_label = QLabel("")
+        self._conflict_label.setObjectName("boldLabel")
+        set_status_color(self._conflict_label, "error")
+        self._conflict_label.setVisible(False)
+        left_layout.addWidget(self._conflict_label)
+
+        # --- RIGHT panel (fixed 340px): token builder ---
+        right_layout = QVBoxLayout(split.right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
 
         # "Pattern Tokens" section header
         tokens_label = QLabel("Pattern Tokens")
         tokens_label.setObjectName("sidebarSection")
-        left_layout.addWidget(tokens_label)
+        right_layout.addWidget(tokens_label)
 
         self._token_widget = RenameTokenWidget()
-        left_layout.addWidget(self._token_widget, stretch=1)
+        right_layout.addWidget(self._token_widget, stretch=1)
 
         # Separator line
         sep_line = QFrame()
         sep_line.setFrameShape(QFrame.Shape.HLine)
         sep_line.setFrameShadow(QFrame.Shadow.Sunken)
-        left_layout.addWidget(sep_line)
+        right_layout.addWidget(sep_line)
 
         # Token settings
         settings_layout = QVBoxLayout()
@@ -474,48 +495,9 @@ class RenamePage(QWidget):
         remove_row.addWidget(QLabel("last"))
         settings_layout.addLayout(remove_row)
 
-        left_layout.addLayout(settings_layout)
+        right_layout.addLayout(settings_layout)
 
-        split_h.addWidget(left_panel)
-
-        # --- RIGHT panel (flex): preview table ---
-        right_panel = QWidget()
-        right_panel.setObjectName("splitRight")
-        right_panel.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(6)
-
-        preview_label = QLabel("Preview")
-        preview_label.setObjectName("sidebarSection")
-        right_layout.addWidget(preview_label)
-
-        # Select all row
-        select_row = QHBoxLayout()
-        self._select_all_checkbox = QCheckBox("Select All")
-        self._select_all_checkbox.setChecked(True)
-        self._select_all_checkbox.setTristate(True)
-        select_row.addWidget(self._select_all_checkbox)
-        select_row.addStretch()
-        self._selected_count_label = QLabel("0 of 0 selected")
-        select_row.addWidget(self._selected_count_label)
-        right_layout.addLayout(select_row)
-
-        self._preview_table = RenamePreviewTable()
-        right_layout.addWidget(self._preview_table, stretch=1)
-
-        # Conflict warning label
-        self._conflict_label = QLabel("")
-        self._conflict_label.setObjectName("boldLabel")
-        set_status_color(self._conflict_label, "error")
-        self._conflict_label.setVisible(False)
-        right_layout.addWidget(self._conflict_label)
-
-        split_h.addWidget(right_panel)
-
-        root.addWidget(split_container, stretch=1)
+        root.addWidget(split, stretch=1)
 
         # 5. Action bar
         action_row = QHBoxLayout()
@@ -596,9 +578,7 @@ class RenamePage(QWidget):
 
     def _save_settings(self) -> None:
         """Save current settings to config."""
-        self._config.set(
-            "rename.last_folder", self._source_input.text(), save=False
-        )
+        self._config.set("rename.last_folder", self._source_input.text(), save=False)
         token_order = [t.value for t in self._token_widget.get_ordered_tokens()]
         self._config.set("rename.token_order", token_order, save=False)
 
@@ -1022,7 +1002,8 @@ class RenamePage(QWidget):
         self._source_input.setEnabled(enabled)
         self._browse_btn.setEnabled(enabled)
         self._scan_btn.setEnabled(
-            enabled and bool(self._source_input.text())
+            enabled
+            and bool(self._source_input.text())
             and Path(self._source_input.text()).is_dir()
         )
         self._token_widget.setEnabled(enabled)

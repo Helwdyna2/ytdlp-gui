@@ -71,7 +71,7 @@ class DataPanel(QWidget):
         header.setObjectName("dpanelHeader")
 
         self._header_layout = QHBoxLayout(header)
-        self._header_layout.setContentsMargins(14, 10, 14, 6)
+        self._header_layout.setContentsMargins(12, 8, 12, 4)
         self._header_layout.setSpacing(8)
 
         self._title_label = QLabel(title.title())
@@ -87,7 +87,7 @@ class DataPanel(QWidget):
         body.setObjectName("dpanelBody")
 
         self._body_layout = QVBoxLayout(body)
-        self._body_layout.setContentsMargins(14, 8, 14, 14)
-        self._body_layout.setSpacing(8)
+        self._body_layout.setContentsMargins(12, 6, 12, 12)
+        self._body_layout.setSpacing(6)
 
         outer.addWidget(body)

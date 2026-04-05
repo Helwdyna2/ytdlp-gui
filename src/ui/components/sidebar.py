@@ -2,27 +2,42 @@
 
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLabel, QButtonGroup, QFrame, QSizePolicy
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QButtonGroup,
+    QFrame,
+    QSizePolicy,
 )
 
 from src.ui.theme.icons import get_icon
 
 SECTIONS = [
-    ("DOWNLOAD", [
-        ("add_urls", "Add URLs"),
-        ("extract_urls", "Extract URLs"),
-    ]),
-    ("PROCESS", [
-        ("convert", "Convert"),
-        ("trim", "Trim"),
-        ("metadata", "Metadata"),
-    ]),
-    ("ORGANIZE", [
-        ("sort", "Sort"),
-        ("rename", "Rename"),
-        ("match", "Match"),
-    ]),
+    (
+        "DOWNLOAD",
+        [
+            ("add_urls", "Add URLs"),
+            ("extract_urls", "Extract URLs"),
+        ],
+    ),
+    (
+        "PROCESS",
+        [
+            ("convert", "Convert"),
+            ("trim", "Trim"),
+            ("metadata", "Metadata"),
+        ],
+    ),
+    (
+        "ORGANIZE",
+        [
+            ("sort", "Sort"),
+            ("rename", "Rename"),
+            ("match", "Match"),
+        ],
+    ),
 ]
 SETTINGS_ITEM = ("settings", "Settings")
 
@@ -47,7 +62,7 @@ class Sidebar(QWidget):
 
     def __init__(self, parent: QWidget = None) -> None:
         super().__init__(parent)
-        self.setFixedWidth(220)
+        self.setFixedWidth(200)
         self.setObjectName("sidebar")
 
         self._buttons: dict[str, QPushButton] = {}
@@ -88,7 +103,7 @@ class Sidebar(QWidget):
         subtitle.setObjectName("appSubtitle")
         layout.addWidget(subtitle)
 
-        layout.addSpacing(16)
+        layout.addSpacing(12)
 
         # Sections
         for section_name, tools in SECTIONS:
@@ -100,7 +115,7 @@ class Sidebar(QWidget):
                 btn = self._make_tool_button(key, label)
                 layout.addWidget(btn)
 
-            layout.addSpacing(8)
+            layout.addSpacing(6)
 
         # Spacer
         spacer = QWidget()
@@ -115,6 +130,14 @@ class Sidebar(QWidget):
         layout.addWidget(self._cta_btn)
 
         layout.addSpacing(8)
+
+        # Separator above settings
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFixedHeight(1)
+        separator.setStyleSheet("background: rgba(72, 71, 74, 0.10); border: none;")
+        layout.addWidget(separator)
+        layout.addSpacing(4)
 
         # Bottom utility links
         settings_key, settings_label = SETTINGS_ITEM
